@@ -1,35 +1,38 @@
 lef:
-  chain_length: 750
-  num_chains: 1
-  separation: 150
+  chain_length: 450
+  num_chains: 10
+  separation: 200
   lifetime: 150
   lifetime_stalled: 150
   warmup_steps: 10000
-  trajectory_length: 100000
+  trajectory_length: 10000
   chunk_size: 50
   seed: 1001
-  output_path: preUV/LEFPositions.h5
+  max_rnapii: 256
+  output_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
 
   topology_kwargs:
-    tad_positions: [150, 300, 450, 600, 750]
+    tad_positions: [150, 300]
     boundary_strength: 0.7
     release_prob: 0.0
     include_chromosome_ends: true
     rnapii_stall_prob: 0.4
     rnapii_push_prob: 0.25
-    ep_contact_tolerance: 5
+    # cohesin block probs
+    rnapii_poised_block_prob: 0.99
+    rnapii_paused_block_prob: 0.99
+    rnapii_elongating_block_prob: 0.99
+    ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
     genes:
-      # - {tss: 180,  tes: 240,  load_prob: 0.04, requires_enhancer: false,
-      #    initiation_prob: 0.05, pause_release_prob: 0.5,
-      #    elongation_step_prob: 0.4, pause_offset: 1}
-      # - {tss: 180,  tes: 240,  load_prob: 0.04, requires_enhancer: true,
-      #    enhancer_pos: 300,
-      #    initiation_prob: 0.2, pause_release_prob: 0.5,
-      #    elongation_step_prob: 0.9, pause_offset: 1}
-      - {tss: 530,  tes: 470,  load_prob: 0.005, requires_enhancer: true,
-         enhancer_pos: 480,
-         initiation_prob: 0.05, pause_release_prob: 0.5,
-         elongation_step_prob: 0.9, pause_offset: 1}
+      - {tss: 260,  tes: 290,  load_prob: 0.05, requires_enhancer: true,
+         enhancer_pos: 155,
+         initiation_prob: 1.0, pause_release_prob: 1.0,
+         elongation_step_prob: 0.2, pause_offset: 0}
+      - {tss: 220,  tes: 250,  load_prob: 0.05, requires_enhancer: true,
+         enhancer_pos: 155,
+         initiation_prob: 1.0, pause_release_prob: 1.0,
+         elongation_step_prob: 0.2, pause_offset: 0}
 
   plugins:
     topology:
@@ -43,15 +46,15 @@ lef:
     rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
 
 viewer:
-  lef_positions_path: preUV/LEFPositions.h5
-  output_path: preUV/bridging_viewer.html
+  lef_positions_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
+  output_path: /home/ogulcan/polychrom/runs/preUV/bridging_viewer.html
   max_frames: 10000
   bridge_cost: 1.0
   insulation_score_window: 50
 
 polymer:
-  lef_positions_path: preUV/LEFPositions.h5
-  output_folder: preUV
+  lef_positions_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
+  output_folder: /home/ogulcan/polychrom/runs/preUV
 
   platform: cuda
   gpu: "0"
@@ -64,12 +67,14 @@ polymer:
   density: 0.2
   pbc: false
 
-  md_steps_per_block: 1000
+  # 1 kb lattice, 0.0063 s / MD step, 2 kb total loop growth per LEF tick
+  # -> ~125 bp/s total cohesin extrusion.
+  md_steps_per_block: 2540
   save_every_blocks: 10
   restart_every_blocks: 200
 
-  initial_relaxation_steps: 500000
-  pre_recording_steps: 500000
+  initial_relaxation_steps: 100000
+  pre_recording_steps: 100000
 
   smc_bond_wiggle: 0.1
   smc_bond_dist: 1.0
@@ -87,7 +92,11 @@ polymer:
         repulsion_radius: 1.05
         attraction_energy: 0.0
         attraction_radius: 2.0
-        selective_attraction_energy: 0.0
+        replicate_ep_pairs_across_chains: true
+        ep_pairs:
+          - [155, 260]
+          - [155, 220]
+        selective_attraction_energy: 1.0
         selective_repulsion_energy: 0.0
         confinement_density: 0.2
         confinement_k: 5.0
@@ -95,14 +104,15 @@ polymer:
       target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
 
 contacts:
-  trajectory_folder: preUV
-  raw_output_path: preUV/contact_map.npy
-  oe_output_path: preUV/contact_map_oe.npy
-  viz_output_path: preUV/contact_map_oe.png
+  trajectory_folder: /home/ogulcan/polychrom/runs/preUV
+  raw_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map.npy
+  oe_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map_oe.npy
+  viz_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map_oe.png
+  replicate_map_starts_across_chains: true
   map_starts: [0]
   map_size: 450
   cutoff: 5.0
-  num_processes: 6
+  num_processes: 36
   verbose: true
 
   plugins:
@@ -123,4 +133,4 @@ contacts:
         vmax: 1.0
         figsize: [12, 12]
         dpi: 150
-        title: "Exp1 biophysical: directional CTCF TADs (ICE O/E)"
+        

@@ -341,6 +341,7 @@ def build_payload(
             e, p = int(p0["e"]), int(p0["p"])
             eps.append({"e": e, "p": p, "label": p0.get("label", "E-P"),
                         "genomic": abs(p - e)})
+    display_eps = [pair for pair in eps if in_win(pair["e"]) and in_win(pair["p"])]
 
     frame_idx = _frame_indices(traj_len, cfg.stride, cfg.max_frames)
 
@@ -371,7 +372,7 @@ def build_payload(
         sampled_arcs.append(arcs)
         # Per-pair effective distance (None entry when a pair is unreachable).
         s_eff = []
-        for pair in eps:
+        for pair in display_eps:
             d = effective_distance(arcs, pair["e"], pair["p"], chain_length, cfg.bridge_cost)
             s_eff.append(None if d is None else round(float(d), 1))
 
@@ -435,7 +436,7 @@ def build_payload(
         "tads": tad_spans,
         "insulation": insulation,
         "tadSignals": tad_signals,
-        "eps": [{**p, "e": p["e"] - start, "p": p["p"] - start} for p in eps],
+        "eps": [{**p, "e": p["e"] - start, "p": p["p"] - start} for p in display_eps],
         "frames": frames,
     }
     return payload

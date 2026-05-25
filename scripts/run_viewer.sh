@@ -17,4 +17,4 @@ rm -r degron
 
 PYTHONPATH=. MAMBA_ROOT_PREFIX=/home/carlos/micromamba micromamba run -n polychrom \
   python -m polychrom.pipelines.loop_extrusion.cli viewer \
-  /home/carlos/Clone/polychrom/degron_configs/control.yaml
+  configs/degron/control.yaml
