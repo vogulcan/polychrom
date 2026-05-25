@@ -214,6 +214,7 @@ class ContactsConfig:
     # Visualisation PNG (written when plugins.viz is set).
     viz_output_path: str = "trajectory/contact_map_oe.png"
     map_starts: List[int] = field(default_factory=lambda: list(range(0, 39000, 4000)))
+    replicate_map_starts_across_chains: bool = False
     map_size: int = 4000
     cutoff: float = 6.0
     num_processes: int = 6

@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         out = polymer_stage.run(cfg.polymer)
         print(f"[polymer]  wrote trajectory to {out}")
     if args.stage in ("contacts", "all"):
-        outs = contacts_stage.run(cfg.contacts)
+        outs = contacts_stage.run(cfg.contacts, cfg.lef)
         for kind, path in outs.items():
             print(f"[contacts] wrote {kind}: {path}")
     return 0

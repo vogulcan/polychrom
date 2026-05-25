@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 from ...hdf5_format import list_URIs
-from .config import ContactsConfig, resolve_plugin
+from .config import ContactsConfig, LEFConfig, resolve_plugin
 
 
 def _save(array: np.ndarray, path: str) -> Path:
@@ -18,12 +19,37 @@ def _save(array: np.ndarray, path: str) -> Path:
     return out
 
 
-def run(cfg: ContactsConfig) -> dict[str, Path]:
+def _effective_map_starts(cfg: ContactsConfig, lef_cfg: Optional[LEFConfig]) -> list[int]:
+    starts = [int(start) for start in cfg.map_starts]
+    if not cfg.replicate_map_starts_across_chains:
+        return starts
+
+    if lef_cfg is None:
+        raise ValueError(
+            "replicate_map_starts_across_chains requires the full pipeline "
+            "config so LEF chain_length and num_chains are available"
+        )
+
+    expanded: list[int] = []
+    for chain_idx in range(lef_cfg.num_chains):
+        chain_offset = chain_idx * lef_cfg.chain_length
+        for start in starts:
+            if not (0 <= start and start + cfg.map_size <= lef_cfg.chain_length):
+                raise ValueError(
+                    f"map_start {start} with map_size {cfg.map_size} does not fit "
+                    f"inside one chain of length {lef_cfg.chain_length}"
+                )
+            expanded.append(chain_offset + start)
+    return expanded
+
+
+def run(cfg: ContactsConfig, lef_cfg: Optional[LEFConfig] = None) -> dict[str, Path]:
     """Sample contact map, compute O/E, render heatmap.
 
     Returns a dict of stage outputs: ``{"raw": ..., "oe": ..., "viz": ...}``
     (keys present only for stages that ran).
     """
+    cfg = replace(cfg, map_starts=_effective_map_starts(cfg, lef_cfg))
 
     uris = list_URIs(str(cfg.trajectory_folder))
     if not uris:

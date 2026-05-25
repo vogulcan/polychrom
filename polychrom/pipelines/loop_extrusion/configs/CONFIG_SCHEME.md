@@ -336,6 +336,10 @@ is inferred from their order (`+1` if `tes > tss`, else `-1`). Every 1D tick:
 
 #### Per-gene fields
 
+For multi-chain replicate simulations, define each gene once in chain-relative
+coordinates and set `replicate_genes_across_chains: true` in `topology_kwargs`.
+The topology plugin expands those sites by `chain_idx * chain_length`.
+
 | Field | Meaning |
 |-------|---------|
 | `tss` | Transcription start site; the load site and POISED position. |
@@ -413,6 +417,7 @@ topology_kwargs:
   rnapii_paused_block_prob: 1.0
   rnapii_elongating_block_prob: 1.0
   ep_contact_tolerance: 10
+  replicate_genes_across_chains: true
   genes: [...]
 ```
 
@@ -614,6 +619,7 @@ Exp2 additionally makes the cognate E-P pairs **selectively** sticky:
 
 ```yaml
 selective_attraction_energy: 1.0   # kT, only between cognate E-P partners
+replicate_ep_pairs_across_chains: true
 ep_pairs:                          # each [enhancer_site, promoter_site]
   - [30, 170]
   - [230, 470]
@@ -623,11 +629,16 @@ ep_pairs:                          # each [enhancer_site, promoter_site]
   - [1430, 1570]
 ```
 
-When `ep_pairs` is set the builder switches to `heteropolymer_SSW` and assigns
-each pair a distinct monomer type whose self-interaction is `1.0` kT. So an
-enhancer is attracted only to **its own** promoter -- not all-to-all among every
-enhancer and promoter. `selective_repulsion_energy` (default `0.0`) is the
+When `ep_pairs` is set the builder switches to `heteropolymer_SSW`, assigns
+each sticky site a distinct monomer type, and turns on only the listed pairwise
+interactions. So an enhancer is attracted only to its listed promoter(s) -- not
+all-to-all among every enhancer and promoter. Shared enhancers are allowed, e.g.
+`[[155, 260], [155, 220]]`. `selective_repulsion_energy` (default `0.0`) is the
 analogous selective repulsion, left off here.
+
+Set `replicate_ep_pairs_across_chains: true` when `ep_pairs` are written in
+chain-relative coordinates and should be copied to every chain. Leave it false
+when `ep_pairs` already contain absolute monomer indices.
 
 > The 1D stage and the 3D stage carry the E-P pairs separately: the 1D
 > `enhancer_pos`/`tss` gate RNAPII pause release (loop-containment proxy), while
@@ -657,10 +668,13 @@ The contact stage reads saved 3D conformations and writes:
 
 ```yaml
 map_starts: [0]
+replicate_map_starts_across_chains: true
 map_size: 1600
 ```
 
-This means sample one full-locus contact map:
+This means sample one full-locus contact map per chain. With
+`replicate_map_starts_across_chains: true`, `map_starts` are chain-relative and
+are expanded by `chain_idx * chain_length`.
 
 ```text
 start = 0

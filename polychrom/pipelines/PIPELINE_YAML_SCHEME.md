@@ -175,6 +175,10 @@ RNAPII-aware topologies also accept cohesin-blocking probabilities in
 matching the previous hard-obstacle behaviour; `rnapii_block_prob` is still
 accepted as a shared paused/elongating fallback for older configs.
 
+For replicate-chain simulations, define `genes` once in chain-relative
+coordinates and set `replicate_genes_across_chains: true`; the topology plugin
+expands them by `chain_idx * chain_length`.
+
 ---
 
 ## 5. Stage 2 — `polymer`
@@ -220,6 +224,14 @@ accepted as a shared paused/elongating fallback for older configs.
 `paper_force_builder` (spherical confinement, `selective_SSW` excluded volume,
 optional cognate E-P attraction via `ep_pairs`).
 
+For replicate-chain simulations, define `ep_pairs` once in chain-relative
+coordinates and set `replicate_ep_pairs_across_chains: true`; the force builder
+expands them by `chain_idx * chain_length`.
+
+Likewise, define contact-map windows once per chain and set
+`replicate_map_starts_across_chains: true`; for whole-chain contact maps this is
+usually `map_starts: [0]` and `map_size: <chain_length>`.
+
 ---
 
 ## 6. Stage 3 — `contacts`
@@ -235,6 +247,7 @@ Contact-map sampling, O/E normalisation, heatmap. Dataclass: `ContactsConfig`.
 | `oe_output_path` | str | `trajectory/contact_map_oe.npy` | O/E map (written when `plugins.obs_over_exp` is set). |
 | `viz_output_path` | str | `trajectory/contact_map_oe.png` | Heatmap PNG (written when `plugins.viz` is set). |
 | `map_starts` | list[int] | `range(0, 39000, 4000)` | Window start monomers. Use multiple small windows for large loci. |
+| `replicate_map_starts_across_chains` | bool | `false` | Treat `map_starts` as chain-relative starts and expand across `lef.num_chains`. |
 | `map_size` | int | `4000` | Window size (monomers). |
 | `cutoff` | float | `6.0` | Contact distance threshold (a contact when 3D distance ≤ cutoff). |
 | `num_processes` | int | `6` | CPU multiprocessing for counting (does not affect GPU MD). |

@@ -8,7 +8,8 @@ lef:
   trajectory_length: 10000
   chunk_size: 50
   seed: 1001
-  output_path: control/LEFPositions.h5
+  max_rnapii: 256
+  output_path: /home/ogulcan/polychrom/runs/control/LEFPositions.h5
 
   topology_kwargs:
     tad_positions: [150, 300]
@@ -22,6 +23,7 @@ lef:
     rnapii_paused_block_prob: 0.99
     rnapii_elongating_block_prob: 0.99
     ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
     genes:
       - {tss: 260,  tes: 290,  load_prob: 0.05, requires_enhancer: true,
          enhancer_pos: 155,
@@ -44,15 +46,15 @@ lef:
     rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
 
 viewer:
-  lef_positions_path: control/LEFPositions.h5
-  output_path: control/bridging_viewer.html
+  lef_positions_path: /home/ogulcan/polychrom/runs/control/LEFPositions.h5
+  output_path: /home/ogulcan/polychrom/runs/control/bridging_viewer.html
   max_frames: 10000
   bridge_cost: 1.0
   insulation_score_window: 50
 
 polymer:
-  lef_positions_path: control/LEFPositions.h5
-  output_folder: control
+  lef_positions_path: /home/ogulcan/polychrom/runs/control/LEFPositions.h5
+  output_folder: /home/ogulcan/polychrom/runs/control
 
   platform: cuda
   gpu: "0"
@@ -90,7 +92,10 @@ polymer:
         repulsion_radius: 1.05
         attraction_energy: 0.0
         attraction_radius: 2.0
-        ep_pairs: [[155, 260], [155, 220]]
+        replicate_ep_pairs_across_chains: true
+        ep_pairs:
+          - [155, 260]
+          - [155, 220]
         selective_attraction_energy: 1.0
         selective_repulsion_energy: 0.0
         confinement_density: 0.2
@@ -99,14 +104,15 @@ polymer:
       target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
 
 contacts:
-  trajectory_folder: control
-  raw_output_path: control/contact_map.npy
-  oe_output_path: control/contact_map_oe.npy
-  viz_output_path: control/contact_map_oe.png
-  map_starts: [0, 450, 900, 1350, 1800, 2250, 2700, 3150, 3600, 4050]
+  trajectory_folder: /home/ogulcan/polychrom/runs/control
+  raw_output_path: /home/ogulcan/polychrom/runs/control/contact_map.npy
+  oe_output_path: /home/ogulcan/polychrom/runs/control/contact_map_oe.npy
+  viz_output_path: /home/ogulcan/polychrom/runs/control/contact_map_oe.png
+  replicate_map_starts_across_chains: true
+  map_starts: [0]
   map_size: 450
   cutoff: 5.0
-  num_processes: 6
+  num_processes: 36
   verbose: true
 
   plugins:

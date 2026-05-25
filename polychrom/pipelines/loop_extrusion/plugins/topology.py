@@ -78,6 +78,37 @@ def _apply_convergent_tads(
                 args["ctcfRelease"][1][right_site] = float(release_prob)
 
 
+def _expand_genes_across_chains(
+    cfg: LEFConfig,
+    genes: Optional[List[dict]],
+    *,
+    replicate_genes_across_chains: bool,
+) -> List[dict]:
+    """Expand chain-relative gene specs to absolute lattice coordinates."""
+    base = [dict(g) for g in (genes or [])]
+    if not replicate_genes_across_chains:
+        return base
+
+    expanded: List[dict] = []
+    for chain_idx in range(cfg.num_chains):
+        offset = chain_idx * cfg.chain_length
+        for spec in base:
+            out = dict(spec)
+            for key in ("tss", "tes", "enhancer_pos"):
+                if key not in out or out[key] is None:
+                    continue
+                site = int(out[key])
+                if not (0 <= site < cfg.chain_length):
+                    raise ValueError(
+                        f"Gene {key}={site} is outside one chain of length "
+                        f"{cfg.chain_length}; disable replicate_genes_across_chains "
+                        "for absolute coordinates"
+                    )
+                out[key] = site + offset
+            expanded.append(out)
+    return expanded
+
+
 def convergent_tad_topology(
     cfg: LEFConfig,
     *,
@@ -122,6 +153,7 @@ def gene_aware_topology(
     rnapii_block_prob: float = 1.0,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
+    replicate_genes_across_chains: bool = False,
 ) -> Dict[str, Any]:
     """CTCF TAD layout + per-gene transcription units.
 
@@ -141,7 +173,12 @@ def gene_aware_topology(
                 args["ctcfCapture"][side][site] = capture_prob
                 args["ctcfRelease"][side][site] = release_prob
 
-    gene_objs = build_genes(genes or [], default_load_prob=rnapii_default_load_prob)
+    gene_specs = _expand_genes_across_chains(
+        cfg,
+        genes,
+        replicate_genes_across_chains=replicate_genes_across_chains,
+    )
+    gene_objs = build_genes(gene_specs, default_load_prob=rnapii_default_load_prob)
     args["genes"] = gene_objs
     args["tss_by_pos"] = {g.tss: g.gene_id for g in gene_objs}
     args["tes_by_pos"] = {g.tes: g.gene_id for g in gene_objs}
@@ -184,6 +221,7 @@ def gene_aware_convergent_tad_topology(
     rnapii_block_prob: float = 1.0,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
+    replicate_genes_across_chains: bool = False,
 ) -> Dict[str, Any]:
     """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
     args = convergent_tad_topology(
@@ -194,7 +232,12 @@ def gene_aware_convergent_tad_topology(
         include_chromosome_ends=include_chromosome_ends,
     )
 
-    gene_objs = build_genes(genes or [], default_load_prob=rnapii_default_load_prob)
+    gene_specs = _expand_genes_across_chains(
+        cfg,
+        genes,
+        replicate_genes_across_chains=replicate_genes_across_chains,
+    )
+    gene_objs = build_genes(gene_specs, default_load_prob=rnapii_default_load_prob)
     args["genes"] = gene_objs
     args["tss_by_pos"] = {g.tss: g.gene_id for g in gene_objs}
     args["tes_by_pos"] = {g.tes: g.gene_id for g in gene_objs}

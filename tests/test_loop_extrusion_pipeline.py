@@ -2,8 +2,10 @@ import h5py
 import numpy as np
 
 from polychrom.pipelines.loop_extrusion import lef as lef_stage
+from polychrom.pipelines.loop_extrusion import contacts as contacts_stage
 from polychrom.pipelines.loop_extrusion import viewer as viewer_stage
 from polychrom.pipelines.loop_extrusion.config import (
+    ContactsConfig,
     LEFConfig,
     PluginSpec,
     ViewerConfig,
@@ -25,6 +27,10 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     STATE_ELONGATING,
     STATE_PAUSED,
     STATE_POISED,
+)
+from polychrom.pipelines.loop_extrusion.plugins import (
+    forces as force_plugins,
+    topology as topology_plugins,
 )
 from polychrom.pipelines.loop_extrusion.viewer import (
     build_elements_export,
@@ -315,6 +321,120 @@ def test_build_payload_shared_enhancer_labels_unique_enhancer_once():
     enhancers = [e for e in payload["elements"] if e["type"] == "enhancer"]
     assert enhancers == [{"position": 300, "type": "enhancer", "label": "E0"}]
     assert [p["label"] for p in payload["eps"]] == ["E0-P0", "E0-P1"]
+
+
+def test_gene_aware_topology_can_replicate_genes_across_chains():
+    cfg = LEFConfig(chain_length=450, num_chains=3, separation=450)
+    args = topology_plugins.gene_aware_convergent_tad_topology(
+        cfg,
+        genes=[
+            {"tss": 260, "tes": 290, "enhancer_pos": 155},
+            {"tss": 220, "tes": 250, "enhancer_pos": 155},
+        ],
+        replicate_genes_across_chains=True,
+    )
+
+    sites = [(g.tss, g.tes, g.enhancer_pos) for g in args["genes"]]
+    assert sites == [
+        (260, 290, 155),
+        (220, 250, 155),
+        (710, 740, 605),
+        (670, 700, 605),
+        (1160, 1190, 1055),
+        (1120, 1150, 1055),
+    ]
+
+
+def test_contacts_can_replicate_map_starts_across_chains():
+    contacts_cfg = ContactsConfig(
+        map_starts=[0],
+        map_size=450,
+        replicate_map_starts_across_chains=True,
+    )
+    lef_cfg = LEFConfig(chain_length=450, num_chains=3, separation=450)
+
+    starts = contacts_stage._effective_map_starts(contacts_cfg, lef_cfg)
+
+    assert starts == [0, 450, 900]
+
+
+def test_paper_force_builder_ep_pairs_support_shared_enhancer(monkeypatch):
+    captured = {}
+
+    class DummySim:
+        N = 500
+
+        def add_force(self, force):
+            pass
+
+    def fake_polymer_chains(sim, **kwargs):
+        nb_kwargs = kwargs["nonbonded_force_kwargs"]
+        captured["monomer_types"] = nb_kwargs["monomerTypes"]
+        captured["interaction_matrix"] = nb_kwargs["interactionMatrix"]
+        return object()
+
+    monkeypatch.setattr(force_plugins.forcekits, "polymer_chains", fake_polymer_chains)
+    monkeypatch.setattr(force_plugins.forces, "spherical_confinement", lambda *args, **kwargs: object())
+
+    force_plugins.paper_force_builder(
+        DummySim(),
+        num_chains=1,
+        chain_length=500,
+        ep_pairs=[[155, 260], [155, 220]],
+    )
+
+    monomer_types = captured["monomer_types"]
+    interaction_matrix = captured["interaction_matrix"]
+    enhancer_type = monomer_types[155]
+    promoter_a_type = monomer_types[260]
+    promoter_b_type = monomer_types[220]
+
+    assert enhancer_type != 0
+    assert promoter_a_type != 0
+    assert promoter_b_type != 0
+    assert interaction_matrix[enhancer_type, promoter_a_type] == 1.0
+    assert interaction_matrix[enhancer_type, promoter_b_type] == 1.0
+    assert interaction_matrix[promoter_a_type, promoter_b_type] == 0.0
+
+
+def test_paper_force_builder_can_replicate_ep_pairs_across_chains(monkeypatch):
+    captured = {}
+
+    class DummySim:
+        N = 1350
+
+        def add_force(self, force):
+            pass
+
+    def fake_polymer_chains(sim, **kwargs):
+        nb_kwargs = kwargs["nonbonded_force_kwargs"]
+        captured["monomer_types"] = nb_kwargs["monomerTypes"]
+        captured["interaction_matrix"] = nb_kwargs["interactionMatrix"]
+        return object()
+
+    monkeypatch.setattr(force_plugins.forcekits, "polymer_chains", fake_polymer_chains)
+    monkeypatch.setattr(force_plugins.forces, "spherical_confinement", lambda *args, **kwargs: object())
+
+    force_plugins.paper_force_builder(
+        DummySim(),
+        num_chains=3,
+        chain_length=450,
+        ep_pairs=[[155, 260], [155, 220]],
+        replicate_ep_pairs_across_chains=True,
+    )
+
+    monomer_types = captured["monomer_types"]
+    interaction_matrix = captured["interaction_matrix"]
+    expected_pairs = [
+        (155, 260),
+        (155, 220),
+        (605, 710),
+        (605, 670),
+        (1055, 1160),
+        (1055, 1120),
+    ]
+    for enhancer, promoter in expected_pairs:
+        assert interaction_matrix[monomer_types[enhancer], monomer_types[promoter]] == 1.0
 
 
 def test_build_payload_promoter_direction_follows_gene(tmp_path):

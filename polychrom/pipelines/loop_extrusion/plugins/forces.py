@@ -62,6 +62,38 @@ def grow_cubic_conformation(*, num_sites: int, box: float, **_: object) -> np.nd
     return grow_cubic(num_sites, int(box) - 2)
 
 
+def _expand_ep_pairs_across_chains(
+    ep_pairs: list,
+    *,
+    num_chains: int,
+    chain_length: int,
+    replicate_ep_pairs_across_chains: bool,
+) -> list:
+    """Expand chain-relative E-P pairs to absolute monomer indices."""
+    base = []
+    for pair in ep_pairs:
+        if len(pair) != 2:
+            raise ValueError(f"ep_pairs entries must have two monomers, got {pair!r}")
+        base.append((int(pair[0]), int(pair[1])))
+
+    if not replicate_ep_pairs_across_chains:
+        return base
+
+    expanded = []
+    for chain_idx in range(num_chains):
+        offset = chain_idx * chain_length
+        for enhancer, promoter in base:
+            for site in (enhancer, promoter):
+                if not (0 <= site < chain_length):
+                    raise ValueError(
+                        f"ep_pairs monomer index {site} is outside one chain of "
+                        f"length {chain_length}; disable replicate_ep_pairs_across_chains "
+                        "for absolute coordinates"
+                    )
+            expanded.append((enhancer + offset, promoter + offset))
+    return expanded
+
+
 def paper_force_builder(
     sim,
     *,
@@ -69,6 +101,7 @@ def paper_force_builder(
     chain_length: int,
     sticky_particles: list = (),
     ep_pairs: list = (),
+    replicate_ep_pairs_across_chains: bool = False,
     extra_hard_particles: list = (),
     bond_length: float = 1.0,
     bond_wiggle: float = 0.1,
@@ -96,16 +129,28 @@ def paper_force_builder(
         for chain_idx in range(num_chains)
     ]
 
-    if ep_pairs:
+    expanded_ep_pairs = _expand_ep_pairs_across_chains(
+        ep_pairs,
+        num_chains=num_chains,
+        chain_length=chain_length,
+        replicate_ep_pairs_across_chains=replicate_ep_pairs_across_chains,
+    )
+
+    if expanded_ep_pairs:
+        sticky_sites = sorted({site for pair in expanded_ep_pairs for site in pair})
+        site_to_type = {site: idx for idx, site in enumerate(sticky_sites, start=1)}
         monomer_types = np.zeros(sim.N, dtype=int)
-        interaction_matrix = np.zeros((len(ep_pairs) + 1, len(ep_pairs) + 1), dtype=float)
-        for pair_idx, pair in enumerate(ep_pairs, start=1):
-            if len(pair) != 2:
-                raise ValueError(f"ep_pairs entries must have two monomers, got {pair!r}")
-            enhancer, promoter = (int(pair[0]), int(pair[1]))
-            monomer_types[enhancer] = pair_idx
-            monomer_types[promoter] = pair_idx
-            interaction_matrix[pair_idx, pair_idx] = 1.0
+        for site, site_type in site_to_type.items():
+            if not (0 <= site < sim.N):
+                raise ValueError(f"ep_pairs monomer index {site} is outside polymer length {sim.N}")
+            monomer_types[site] = site_type
+
+        interaction_matrix = np.zeros((len(sticky_sites) + 1, len(sticky_sites) + 1), dtype=float)
+        for enhancer, promoter in expanded_ep_pairs:
+            enhancer_type = site_to_type[enhancer]
+            promoter_type = site_to_type[promoter]
+            interaction_matrix[enhancer_type, promoter_type] = 1.0
+            interaction_matrix[promoter_type, enhancer_type] = 1.0
         nonbonded_force_func = forces.heteropolymer_SSW
         nonbonded_force_kwargs = {
             "interactionMatrix": interaction_matrix,
