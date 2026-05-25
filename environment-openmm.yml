@@ -1,0 +1,18 @@
+name: polychrom
+channels:
+  - conda-forge
+dependencies:
+  - python=3.14
+  - openmm=8.5
+  - cython
+  - numpy
+  - scipy
+  - h5py
+  - pandas
+  - pyyaml
+  - matplotlib
+  - pytest
+  - ipykernel
+  - pip
+  - pip:
+      - -e .

@@ -1,0 +1,93 @@
+# Experiment 1: TADs + cohesin, no RNAPII anywhere.
+# Control for experiment2_tads_transcription.yaml -- identical TAD layout,
+# LEF dynamics, polymer force kit, and contact sampling; differs only in
+# the absence of transcription.
+#
+# CUDA, ~5-6 min on RTX 3070 Ti.
+
+lef:
+  chain_length: 1600
+  num_chains: 1
+  separation: 50
+  lifetime: 200
+  lifetime_stalled: 200
+  trajectory_length: 8000
+  chunk_size: 50
+  output_path: trajectory_exp1/LEFPositions.h5
+
+  topology_kwargs:
+    tad_positions: [200, 500, 800, 1100, 1400]
+    capture_prob: 0.95
+    release_prob: 0.002
+    symmetric: true
+
+  plugins:
+    topology:
+      target: polychrom.pipelines.loop_extrusion.plugins.topology:uniform_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_one
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate
+
+polymer:
+  lef_positions_path: trajectory_exp1/LEFPositions.h5
+  output_folder: trajectory_exp1
+
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.005
+  collision_rate: 0.03
+  precision: mixed
+
+  density: 0.15
+  pbc: true
+
+  md_steps_per_block: 750
+  save_every_blocks: 10
+  restart_every_blocks: 400
+
+  smc_bond_wiggle: 0.2
+  smc_bond_dist: 0.5
+  max_data_length: 100
+  overwrite: true
+
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:default_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: 1.5
+        repulsive_trunc: 1.5
+        repulsive_radius_mult: 1.05
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  trajectory_folder: trajectory_exp1
+  raw_output_path: trajectory_exp1/contact_map.npy
+  oe_output_path: trajectory_exp1/contact_map_oe.npy
+  viz_output_path: trajectory_exp1/contact_map_oe.png
+  map_starts: [0]
+  map_size: 1600
+  cutoff: 5.5
+  num_processes: 6
+  verbose: false
+
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:observed_over_expected
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150
+        title: "Exp1: TADs only (control)"

@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 
 import polychrom.polymer_analyses as polymer_analyses
@@ -23,6 +25,10 @@ class DummyContactMap(object):
             raise StopIteration
         self.M -= 1
         return self.a
+
+
+def load_array(index, arrays):
+    return arrays[index]
 
 
 def test_contactmaps():
@@ -52,12 +58,13 @@ def test_contactmaps():
     assert np.allclose(cmap1, cmap4)
     assert np.allclose(cmap1, cmap3)
 
+    load_test_array = partial(load_array, arrays=ars)
     for n in [1, 4]:
-        cmap6 = monomerResolutionContactMap(range(8), cutoff=1, loadFunction=lambda x: ars[x], n=n)
+        cmap6 = monomerResolutionContactMap(range(8), cutoff=1, loadFunction=load_test_array, n=n)
         cmap5 = cmapPureMap(
             range(8),
             cutoff=1,
-            loadFunction=lambda x: ars[x],
+            loadFunction=load_test_array,
             n=n,
             printProbability=0.000001,
         )
@@ -69,7 +76,7 @@ def test_contactmaps():
             chains=[(0, 27), (27, 60)],
             binSize=2,
             cutoff=1,
-            loadFunction=lambda x: ars[x],
+            loadFunction=load_test_array,
             n=n,
         )[0]
 
@@ -78,7 +85,7 @@ def test_contactmaps():
             chains=[(0, 27), (27, 60)],
             binSize=2,
             cutoff=1,
-            loadFunction=lambda x: ars[x],
+            loadFunction=load_test_array,
             n=n,
             printProbability=0.000001,
         )[0]

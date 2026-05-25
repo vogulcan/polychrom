@@ -45,6 +45,7 @@ all the things that "averageContacts" do, but on only one core. In fact, "averag
 import ctypes
 import multiprocessing as mp
 import random
+import time
 import warnings
 from contextlib import closing
 
@@ -124,6 +125,55 @@ def chunk(mylist, chunksize):
     return [mylist[i:j] for i, j in zip(chunks[:-1], chunks[1:])]
 
 
+def _identity_contacts(contacts):
+    return contacts
+
+
+def _input_count(value):
+    try:
+        return len(value)
+    except TypeError:
+        return 1
+
+
+def _get_progress_total(inValues, kwargs):
+    total = kwargs.get("progressTotal", None)
+    if total is not None:
+        return total
+    try:
+        return len(inValues)
+    except TypeError:
+        return None
+
+
+def _get_progress_interval(total):
+    if total is None:
+        return 1
+    return max(1, int(np.ceil(total / 20.0)))
+
+
+def _print_progress(label, done, total, start_time):
+    elapsed = time.time() - start_time
+    if total:
+        percent = 100.0 * done / total
+        print(f"{label}: {done}/{total} ({percent:.1f}%), {elapsed:.1f}s", flush=True)
+    else:
+        print(f"{label}: {done} completed, {elapsed:.1f}s", flush=True)
+
+
+class _BinnedContactProcessing(object):
+    def __init__(self, bins):
+        self.bins = bins
+
+    def __call__(self, contacts):
+        contacts = np.asarray(contacts, order="C")
+        cshape = contacts.shape
+        contacts.shape = (-1,)
+        contacts = np.searchsorted(self.bins, contacts) - 1
+        contacts.shape = cshape
+        return contacts
+
+
 def simple_worker(x, uniqueContacts):
     """
     A "reference" version of "worker" function below that runs on only one core.
@@ -155,7 +205,7 @@ def simple_worker(x, uniqueContacts):
             else:
                 sharedArrays__[0][ctrue] += 1
         except StopIteration:
-            return
+            return _input_count(x)
 
 
 def averageContactsSimple(contactIterator, inValues, N, **kwargs):
@@ -186,7 +236,11 @@ def averageContactsSimple(contactIterator, inValues, N, **kwargs):
     classInitArgs = kwargs.get("classInitArgs", [])
     classInitKwargs = kwargs.get("classInitKwargs", {})
     uniqueContacts = kwargs.get("uniqueContacts", False)
-    contactProcessing = kwargs.get("contactProcessing", lambda x: x)
+    contactProcessing = kwargs.get("contactProcessing", _identity_contacts)
+    verbose = kwargs.get("verbose", False)
+    progressLabel = kwargs.get("progressLabel", "averageContacts")
+    progressTotal = _get_progress_total(inValues, kwargs)
+    progressInterval = kwargs.get("progressEvery", _get_progress_interval(progressTotal))
     finalSize = N * (N + 1) // 2
     sharedArrays = [np.zeros(finalSize, dtype=arrayDtype)]  # just an array, not a shared array here bc 1 core
     argset = list(sharedArrays) + [
@@ -198,8 +252,22 @@ def averageContactsSimple(contactIterator, inValues, N, **kwargs):
         N,
     ]
     init(*argset)
-    [simple_worker(x, uniqueContacts) for x in inValues]  # just calling workers
+    start_time = time.time()
+    if verbose:
+        print(f"{progressLabel}: starting on 1 process", flush=True)
+    done = 0
+    next_report = progressInterval
+    for x in inValues:  # just calling workers
+        done += simple_worker(x, uniqueContacts) or 0
+        if verbose and (progressTotal is None or done >= next_report or done >= progressTotal):
+            _print_progress(progressLabel, done, progressTotal, start_time)
+            while progressTotal is not None and next_report <= done:
+                next_report += progressInterval
+    if verbose:
+        print(f"{progressLabel}: assembling matrix", flush=True)
     final = triagToNormal(sharedArrays[0], N)
+    if verbose:
+        print(f"{progressLabel}: done", flush=True)
     return final
 
 
@@ -239,7 +307,7 @@ def worker(x):
 
         if (contactSum > contactBlock__) or stopped:  # we aggregated enough contacts.  ready to dump them.
             if len(allContacts) == 0:
-                return  # no contacts found at all - exiting (we must be stopped)
+                return _input_count(x)  # no contacts found at all - exiting (we must be stopped)
             contactSum = 0
             contacts = np.concatenate(allContacts, axis=0)
             contacts = contactProcessing__(contacts)
@@ -278,7 +346,7 @@ def worker(x):
                     break  # back to the main loop
             allContacts = []
             if stopped:
-                return
+                return _input_count(x)
 
 
 def averageContacts(contactIterator, inValues, N, **kwargs):
@@ -306,6 +374,9 @@ def averageContacts(contactIterator, inValues, N, **kwargs):
         nproc : int, number of processors(default 4)
         bucketNum: int (default = nproc) Number of memory buckets to use
         contactBlock: int (default 500k) Number of contacts to aggregate before writing
+        verbose : bool, print progress as worker chunks complete
+        progressTotal : int, optional total units for progress messages
+        progressEvery : int, optional progress-report interval in total units
 
         useFmap : True, False, or callable
             If True, uses mirnylib.systemutils.fmap
@@ -352,7 +423,11 @@ def averageContacts(contactIterator, inValues, N, **kwargs):
     contactBlock = kwargs.get("contactBlock", 5000000)
     classInitArgs = kwargs.get("classInitArgs", [])
     classInitKwargs = kwargs.get("classInitKwargs", {})
-    contactProcessing = kwargs.get("contactProcessing", lambda x: x)
+    contactProcessing = kwargs.get("contactProcessing", _identity_contacts)
+    verbose = kwargs.get("verbose", False)
+    progressLabel = kwargs.get("progressLabel", "averageContacts")
+    progressTotal = _get_progress_total(inValues, kwargs)
+    progressInterval = kwargs.get("progressEvery", _get_progress_interval(progressTotal))
     finalSize = N * (N + 1) // 2
     boundaries = np.linspace(0, finalSize, bucketNum + 1, dtype=int)
     chunks = zip(boundaries[:-1], boundaries[1:])
@@ -366,12 +441,29 @@ def averageContacts(contactIterator, inValues, N, **kwargs):
         N,
     ]
 
+    start_time = time.time()
+    if verbose:
+        print(f"{progressLabel}: starting on {nproc} processes", flush=True)
     with closing(mp.Pool(processes=nproc, initializer=init, initargs=argset)) as p:
-        p.map(worker, inValues)
+        if verbose:
+            done = 0
+            next_report = progressInterval
+            for count in p.imap_unordered(worker, inValues):
+                done += count or 0
+                if progressTotal is None or done >= next_report or done >= progressTotal:
+                    _print_progress(progressLabel, done, progressTotal, start_time)
+                    while progressTotal is not None and next_report <= done:
+                        next_report += progressInterval
+        else:
+            p.map(worker, inValues)
 
+    if verbose:
+        print(f"{progressLabel}: assembling matrix", flush=True)
     res = np.concatenate([tonumpyarray(i) for i in sharedArrays])
     del sharedArrays  # save memory
     final = triagToNormal(res, N)
+    if verbose:
+        print(f"{progressLabel}: done", flush=True)
     return final
 
 
@@ -480,14 +572,6 @@ def binnedContactMap(
     chromosomeStarts = np.cumsum(chainBinNums)
     chromosomeStarts = np.hstack((0, chromosomeStarts))
 
-    def contactAction(contacts, myBins=[bins]):
-        contacts = np.asarray(contacts, order="C")
-        cshape = contacts.shape
-        contacts.shape = (-1,)
-        contacts = np.searchsorted(myBins[0], contacts) - 1
-        contacts.shape = cshape
-        return contacts
-
     args = [cutoff, loadFunction, exceptionsToIgnore, contactFinder]
     values = [filenames[i::n] for i in range(n)]
     mymap = averageContacts(
@@ -496,7 +580,7 @@ def binnedContactMap(
         Nbase,
         classInitArgs=args,
         useFmap=useFmap,
-        contactProcessing=contactAction,
+        contactProcessing=_BinnedContactProcessing(bins),
         nproc=n,
     )
     return mymap, chromosomeStarts
@@ -573,9 +657,16 @@ def monomerResolutionContactMapSubchains(
     loadFunction=polymerutils.load,
     exceptionsToIgnore=[],
     useFmap=False,
+    verbose=False,
+    verboseChunksPerProcess=10,
 ):
     args = [mapStarts, mapN, cutoff, loadFunction, exceptionsToIgnore, method]
-    values = [filenames[i::n] for i in range(n)]
+    if verbose:
+        chunk_count = min(len(filenames), max(n * verboseChunksPerProcess, 1))
+        chunk_size = max(1, int(np.ceil(len(filenames) / float(chunk_count))))
+        values = [filenames[i : i + chunk_size] for i in range(0, len(filenames), chunk_size)]
+    else:
+        values = [filenames[i::n] for i in range(n)]
     return averageContacts(
         filenameContactMapRepeat,
         values,
@@ -584,4 +675,7 @@ def monomerResolutionContactMapSubchains(
         useFmap=useFmap,
         uniqueContacts=True,
         nproc=n,
+        verbose=verbose,
+        progressTotal=len(filenames),
+        progressLabel="monomerResolutionContactMapSubchains",
     )

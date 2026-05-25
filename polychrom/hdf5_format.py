@@ -232,6 +232,14 @@ def load_URI(dset_path):
         return _read_h5_group(myfile[group])
 
 
+def load_URI_pos(dset_path):
+    """
+    Loads only the monomer positions from a single HDF5 trajectory block URI.
+    """
+
+    return load_URI(dset_path)["pos"]
+
+
 def save_hdf5_file(filename, data_dict, dset_opts=None, mode="w"):
     """
     Saves data_dict to filename

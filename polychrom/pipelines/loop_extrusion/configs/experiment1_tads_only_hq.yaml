@@ -1,0 +1,107 @@
+# Experiment 1 HQ: TADs + cohesin, no RNAPII.
+# Publication-oriented variant of experiment1_tads_only.yaml.
+# Uses paper-style polymer physics, LEF warmup, longer sampling,
+# deterministic seeds, and ICE-balanced observed/expected maps.
+
+lef:
+  chain_length: 1600
+  num_chains: 1
+  separation: 240
+  lifetime: 150
+  lifetime_stalled: 150
+  warmup_steps: 10000
+  trajectory_length: 20000
+  chunk_size: 50
+  seed: 1001
+  output_path: trajectory_exp1_hq/LEFPositions.h5
+
+  topology_kwargs:
+    tad_positions: [200, 500, 800, 1100, 1400]
+    capture_prob: 0.5
+    release_prob: 0.0
+    symmetric: true
+
+  plugins:
+    topology:
+      target: polychrom.pipelines.loop_extrusion.plugins.topology:uniform_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_one
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate
+
+polymer:
+  lef_positions_path: trajectory_exp1_hq/LEFPositions.h5
+  output_folder: trajectory_exp1_hq
+
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.01
+  collision_rate: 1.0
+  precision: mixed
+  seed: 2001
+
+  density: 0.2
+  pbc: false
+
+  md_steps_per_block: 1000
+  save_every_blocks: 10
+  restart_every_blocks: 200
+
+  initial_relaxation_steps: 500000
+  pre_recording_steps: 500000
+
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 100
+  overwrite: true
+
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: null
+        repulsion_energy: 50.0
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 2.0
+        selective_attraction_energy: 0.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.2
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  trajectory_folder: trajectory_exp1_hq
+  raw_output_path: trajectory_exp1_hq/contact_map.npy
+  oe_output_path: trajectory_exp1_hq/contact_map_oe.npy
+  viz_output_path: trajectory_exp1_hq/contact_map_oe.png
+  map_starts: [0]
+  map_size: 1600
+  cutoff: 5.0
+  num_processes: 6
+  verbose: true
+
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 200
+        tol: 1.0e-6
+        ignore_diagonals: 1
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150
+        title: "Exp1 HQ: TADs only (balanced O/E)"

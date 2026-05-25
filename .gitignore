@@ -9,3 +9,5 @@ polychrom/_polymer_math.cpp
 .idea
 dist
 polychrom/*.so
+.venv
+supplementary_material_clean.txt

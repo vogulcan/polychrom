@@ -1,0 +1,308 @@
+"""Linear-setup plugins: chain layout and CTCF site placement.
+
+A topology plugin returns the ``args`` dict consumed by the LEF dynamics,
+already populated with ``N``, ``LIFETIME``, ``LIFETIME_STALLED``,
+``ctcfCapture`` and ``ctcfRelease``.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+from ..config import LEFConfig
+from .rnapii import build_genes
+
+
+def _empty_ctcf() -> Dict[int, Dict[int, float]]:
+    return {-1: {}, 1: {}}
+
+
+def _base_args(cfg: LEFConfig) -> Dict[str, Any]:
+    return {
+        "N": cfg.num_sites,
+        "LIFETIME": cfg.lifetime,
+        "LIFETIME_STALLED": cfg.lifetime_stalled,
+        "ctcfCapture": _empty_ctcf(),
+        "ctcfRelease": _empty_ctcf(),
+    }
+
+
+def uniform_tad_topology(
+    cfg: LEFConfig,
+    *,
+    tad_positions: Iterable[int] = (300, 800, 1500, 2300, 2900, 3400),
+    capture_prob: float = 0.9,
+    release_prob: float = 0.003,
+    symmetric: bool = True,
+) -> Dict[str, Any]:
+    """Repeat the same TAD CTCF layout across every chain.
+
+    Mirrors the layout used in ``extrusion_1D_newCode.ipynb``: every chain
+    of length ``cfg.chain_length`` gets the same set of CTCF positions, each
+    acting on both sides (``symmetric=True``).
+    """
+    args = _base_args(cfg)
+    sides = (-1, 1) if symmetric else (1,)
+    for chain_idx in range(cfg.num_chains):
+        chain_offset = chain_idx * cfg.chain_length
+        for pos in tad_positions:
+            site = chain_offset + pos
+            for side in sides:
+                args["ctcfCapture"][side][site] = capture_prob
+                args["ctcfRelease"][side][site] = release_prob
+    return args
+
+
+def _apply_convergent_tads(
+    args: Dict[str, Any],
+    cfg: LEFConfig,
+    *,
+    tad_positions: Iterable[int],
+    boundary_strength: float,
+    release_prob: float,
+    include_chromosome_ends: bool,
+) -> None:
+    """Place inward-facing CTCF barriers at each TAD interval edge."""
+    inner = [int(pos) for pos in tad_positions]
+    boundaries = [0, *inner, cfg.chain_length]
+    for chain_idx in range(cfg.num_chains):
+        chain_offset = chain_idx * cfg.chain_length
+        for start, end in zip(boundaries[:-1], boundaries[1:]):
+            left_site = chain_offset + start
+            right_site = chain_offset + end - 1
+            if include_chromosome_ends or start != 0:
+                args["ctcfCapture"][-1][left_site] = float(boundary_strength)
+                args["ctcfRelease"][-1][left_site] = float(release_prob)
+            if include_chromosome_ends or end != cfg.chain_length:
+                args["ctcfCapture"][1][right_site] = float(boundary_strength)
+                args["ctcfRelease"][1][right_site] = float(release_prob)
+
+
+def convergent_tad_topology(
+    cfg: LEFConfig,
+    *,
+    tad_positions: Iterable[int] = (),
+    boundary_strength: float = 0.5,
+    release_prob: float = 0.0,
+    include_chromosome_ends: bool = True,
+) -> Dict[str, Any]:
+    """TAD layout with directional, inward-facing CTCF barriers.
+
+    For each TAD interval, the left edge captures the left-moving cohesin leg
+    and the right edge captures the right-moving leg. With ``release_prob=0``,
+    captured legs remain at CTCF until cohesin unloads, matching the NRMCB
+    supplementary-box assumption.
+    """
+    args = _base_args(cfg)
+    _apply_convergent_tads(
+        args,
+        cfg,
+        tad_positions=tad_positions,
+        boundary_strength=boundary_strength,
+        release_prob=release_prob,
+        include_chromosome_ends=include_chromosome_ends,
+    )
+    return args
+
+
+def gene_aware_topology(
+    cfg: LEFConfig,
+    *,
+    tad_positions: Iterable[int] = (),
+    capture_prob: float = 0.9,
+    release_prob: float = 0.003,
+    symmetric: bool = True,
+    genes: Optional[List[dict]] = None,
+    rnapii_stride: int = 1,
+    rnapii_stall_prob: float = 0.4,
+    rnapii_push_prob: float = 0.3,
+    rnapii_poised_block_prob: float = 1.0,
+    rnapii_paused_block_prob: Optional[float] = None,
+    rnapii_elongating_block_prob: Optional[float] = None,
+    rnapii_block_prob: float = 1.0,
+    rnapii_default_load_prob: float = 0.02,
+    ep_contact_tolerance: int = 2,
+) -> Dict[str, Any]:
+    """CTCF TAD layout + per-gene transcription units.
+
+    Mirrors :func:`uniform_tad_topology` for CTCFs (TAD pattern repeated
+    across every chain) and additionally populates the gene / RNAPII
+    bookkeeping fields consumed by ``rnapii.translocate_rnapii`` and
+    ``lef_dynamics.translocate_with_rnapii``.
+    """
+    args = _base_args(cfg)
+    sides = (-1, 1) if symmetric else (1,)
+
+    for chain_idx in range(cfg.num_chains):
+        chain_offset = chain_idx * cfg.chain_length
+        for pos in tad_positions:
+            site = chain_offset + pos
+            for side in sides:
+                args["ctcfCapture"][side][site] = capture_prob
+                args["ctcfRelease"][side][site] = release_prob
+
+    gene_objs = build_genes(genes or [], default_load_prob=rnapii_default_load_prob)
+    args["genes"] = gene_objs
+    args["tss_by_pos"] = {g.tss: g.gene_id for g in gene_objs}
+    args["tes_by_pos"] = {g.tes: g.gene_id for g in gene_objs}
+    args["rnapii_by_pos"] = {}
+    args["cohesin_leg_by_pos"] = {}
+    args["rnapii_stride"] = int(rnapii_stride)
+    args["rnapii_stall_prob"] = float(rnapii_stall_prob)
+    args["rnapii_push_prob"] = float(rnapii_push_prob)
+    fallback_block_prob = float(rnapii_block_prob)
+    args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
+    args["rnapii_paused_block_prob"] = (
+        fallback_block_prob
+        if rnapii_paused_block_prob is None
+        else float(rnapii_paused_block_prob)
+    )
+    args["rnapii_elongating_block_prob"] = (
+        fallback_block_prob
+        if rnapii_elongating_block_prob is None
+        else float(rnapii_elongating_block_prob)
+    )
+    args["rnapii_block_prob"] = fallback_block_prob
+    args["ep_contact_tolerance"] = int(ep_contact_tolerance)
+    return args
+
+
+def gene_aware_convergent_tad_topology(
+    cfg: LEFConfig,
+    *,
+    tad_positions: Iterable[int] = (),
+    boundary_strength: float = 0.5,
+    release_prob: float = 0.0,
+    include_chromosome_ends: bool = True,
+    genes: Optional[List[dict]] = None,
+    rnapii_stride: int = 1,
+    rnapii_stall_prob: float = 0.4,
+    rnapii_push_prob: float = 0.3,
+    rnapii_poised_block_prob: float = 1.0,
+    rnapii_paused_block_prob: Optional[float] = None,
+    rnapii_elongating_block_prob: Optional[float] = None,
+    rnapii_block_prob: float = 1.0,
+    rnapii_default_load_prob: float = 0.02,
+    ep_contact_tolerance: int = 2,
+) -> Dict[str, Any]:
+    """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
+    args = convergent_tad_topology(
+        cfg,
+        tad_positions=tad_positions,
+        boundary_strength=boundary_strength,
+        release_prob=release_prob,
+        include_chromosome_ends=include_chromosome_ends,
+    )
+
+    gene_objs = build_genes(genes or [], default_load_prob=rnapii_default_load_prob)
+    args["genes"] = gene_objs
+    args["tss_by_pos"] = {g.tss: g.gene_id for g in gene_objs}
+    args["tes_by_pos"] = {g.tes: g.gene_id for g in gene_objs}
+    args["rnapii_by_pos"] = {}
+    args["cohesin_leg_by_pos"] = {}
+    args["rnapii_stride"] = int(rnapii_stride)
+    args["rnapii_stall_prob"] = float(rnapii_stall_prob)
+    args["rnapii_push_prob"] = float(rnapii_push_prob)
+    fallback_block_prob = float(rnapii_block_prob)
+    args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
+    args["rnapii_paused_block_prob"] = (
+        fallback_block_prob
+        if rnapii_paused_block_prob is None
+        else float(rnapii_paused_block_prob)
+    )
+    args["rnapii_elongating_block_prob"] = (
+        fallback_block_prob
+        if rnapii_elongating_block_prob is None
+        else float(rnapii_elongating_block_prob)
+    )
+    args["rnapii_block_prob"] = fallback_block_prob
+    args["ep_contact_tolerance"] = int(ep_contact_tolerance)
+    return args
+
+
+def ep_pair_topology(
+    cfg: LEFConfig,
+    *,
+    n_pairs: int = 7,
+    ep_distance: int = 400,
+    pair_spacing: int = 10_000,
+    first_pair_offset: Optional[int] = None,
+    boundary_strength: float = 0.5,
+    convergent_orientation: bool = True,
+) -> Dict[str, Any]:
+    """E-P pair layout from the NRMCB supplementary box 1.
+
+    Places ``n_pairs`` cognate enhancer/promoter pairs along the lattice:
+
+        E_i at offset + i * pair_spacing
+        P_i at offset + i * pair_spacing + ep_distance
+
+    Each pair is flanked by one CBS at ``E_i - 1`` and one at ``P_i + 1``.
+    Convergent orientation (standard convergent-CTCF loop anchor): the left
+    CBS stalls the left-moving (-1) leg and the right CBS stalls the
+    right-moving (+1) leg, so a cohesin extruding between the two CBSs is
+    bracketed and the resulting loop encloses E and P, bringing them into
+    proximity. Release probability is zero -- stalled cohesins only leave
+    when the LEF unloads (per paper section 2).
+
+    The list of E and P monomer indices is written to
+    ``args["sticky_particles"]`` so the polymer-stage force builder can
+    consume the same layout via YAML mirroring (or programmatic glue).
+    """
+    args = _base_args(cfg)
+    cfg_N = cfg.num_sites
+
+    if first_pair_offset is None:
+        used = (n_pairs - 1) * pair_spacing + ep_distance
+        first_pair_offset = max(0, (cfg_N - used) // 2)
+
+    ep_pairs: list = []
+    sticky: list = []
+    for i in range(n_pairs):
+        e = first_pair_offset + i * pair_spacing
+        p = e + ep_distance
+        if not (0 <= e and p < cfg_N):
+            raise ValueError(
+                f"E-P pair {i} positions ({e}, {p}) fall outside lattice of size {cfg_N}"
+            )
+        ep_pairs.append((e, p))
+        sticky.extend([e, p])
+
+        left_ctcf = e - 1
+        right_ctcf = p + 1
+        if 0 <= left_ctcf:
+            if convergent_orientation:
+                args["ctcfCapture"][-1][left_ctcf] = boundary_strength   # stalls left-moving (-1) leg
+            else:
+                args["ctcfCapture"][1][left_ctcf] = boundary_strength
+        if right_ctcf < cfg_N:
+            if convergent_orientation:
+                args["ctcfCapture"][1][right_ctcf] = boundary_strength   # stalls right-moving (+1) leg
+            else:
+                args["ctcfCapture"][-1][right_ctcf] = boundary_strength
+
+    args["ep_pairs"] = ep_pairs
+    args["sticky_particles"] = sticky
+    args["boundary_strength"] = boundary_strength
+    return args
+
+
+def explicit_ctcf_topology(
+    cfg: LEFConfig,
+    *,
+    left_capture: Mapping[int, float] | None = None,
+    right_capture: Mapping[int, float] | None = None,
+    left_release: Mapping[int, float] | None = None,
+    right_release: Mapping[int, float] | None = None,
+) -> Dict[str, Any]:
+    """User supplies CTCF site dictionaries directly via YAML kwargs."""
+    args = _base_args(cfg)
+    if left_capture:
+        args["ctcfCapture"][-1].update({int(k): float(v) for k, v in left_capture.items()})
+    if right_capture:
+        args["ctcfCapture"][1].update({int(k): float(v) for k, v in right_capture.items()})
+    if left_release:
+        args["ctcfRelease"][-1].update({int(k): float(v) for k, v in left_release.items()})
+    if right_release:
+        args["ctcfRelease"][1].update({int(k): float(v) for k, v in right_release.items()})
+    return args

@@ -1,0 +1,95 @@
+# RNAPII demo config: single chain with TADs + transcribing genes.
+#
+# Three genes (one reverse-strand) embedded in a 4-TAD layout. RNAPII
+# stride 2, head-on encounters stall/push/pass cohesin per the configured
+# probabilities; cohesin bypasses RNAPII parked at TES.
+
+lef:
+  chain_length: 800
+  num_chains: 1
+  separation: 60
+  lifetime: 150
+  lifetime_stalled: 150
+  trajectory_length: 3000
+  chunk_size: 50
+  max_rnapii: 64
+  output_path: trajectory_rnapii/LEFPositions.h5
+
+  topology_kwargs:
+    tad_positions: [100, 250, 400, 550, 700]
+    capture_prob: 0.95
+    release_prob: 0.002
+    symmetric: true
+    genes:
+      - {tss: 180, tes: 320, load_prob: 0.05}    # forward, inside TAD 2
+      - {tss: 600, tes: 470, load_prob: 0.05}    # reverse, spans TAD 4->3
+      - {tss: 580, tes: 680, load_prob: 0.04}    # forward, inside TAD 5
+    rnapii_stride: 2
+    rnapii_stall_prob: 0.4
+    rnapii_push_prob: 0.25
+    rnapii_default_load_prob: 0.02
+
+  plugins:
+    topology:
+      target: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_one
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load:        polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:translocate_rnapii
+
+polymer:
+  lef_positions_path: trajectory_rnapii/LEFPositions.h5
+  output_folder: trajectory_rnapii
+  platform: CPU
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.01
+  collision_rate: 0.03
+  precision: mixed
+  density: 0.15
+  md_steps_per_block: 200
+  save_every_blocks: 3
+  restart_every_blocks: 300
+  smc_bond_wiggle: 0.2
+  smc_bond_dist: 0.5
+  max_data_length: 100
+  overwrite: true
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:default_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: 1.5
+        repulsive_trunc: 1.5
+        repulsive_radius_mult: 1.05
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  trajectory_folder: trajectory_rnapii
+  raw_output_path: trajectory_rnapii/contact_map.npy
+  oe_output_path: trajectory_rnapii/contact_map_oe.npy
+  viz_output_path: trajectory_rnapii/contact_map_oe.png
+  map_starts: [0]
+  map_size: 800
+  cutoff: 5.5
+  num_processes: 4
+  verbose: true
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:observed_over_expected
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [10, 10]
+        dpi: 150

@@ -29,6 +29,8 @@ dependencies = [
     "scipy>=0.16",
     "h5py>=2.5",
     "pandas>=0.19",
+    "pyyaml>=6.0",
+    "matplotlib>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +46,7 @@ Repository = "https://github.com/open2c/polychrom"
 
 [project.scripts]
 polychrom = "polychrom.cli:cli"
+polychrom-loopext = "polychrom.pipelines.loop_extrusion.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["polychrom*"]

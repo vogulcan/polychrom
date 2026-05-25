@@ -1,0 +1,114 @@
+lef:
+  chain_length: 450
+  num_chains: 10
+  separation: 200
+  lifetime: 150
+  lifetime_stalled: 150
+  warmup_steps: 10000
+  trajectory_length: 10000
+  chunk_size: 50
+  seed: 1001
+  output_path: degron/LEFPositions.h5
+
+  topology_kwargs:
+    tad_positions: [150, 300]
+    boundary_strength: 0.7
+    release_prob: 0.0
+    include_chromosome_ends: true
+
+  plugins:
+    topology:
+      target: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_one
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load:        polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+
+viewer:
+  lef_positions_path: degron/LEFPositions.h5
+  output_path: degron/bridging_viewer.html
+  max_frames: 10000
+  bridge_cost: 1.0
+  insulation_score_window: 50
+
+polymer:
+  lef_positions_path: degron/LEFPositions.h5
+  output_folder: degron
+
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.01
+  collision_rate: 1.0
+  precision: mixed
+  seed: 2001
+
+  density: 0.2
+  pbc: false
+
+  # 1 kb lattice, 0.0063 s / MD step, 2 kb total loop growth per LEF tick
+  # -> ~125 bp/s total cohesin extrusion.
+  md_steps_per_block: 2540
+  save_every_blocks: 10
+  restart_every_blocks: 200
+
+  initial_relaxation_steps: 100000
+  pre_recording_steps: 100000
+
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 100
+  overwrite: true
+
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: null
+        repulsion_energy: 50.0
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 2.0
+        ep_pairs: [[155, 260], [155, 220]]
+        selective_attraction_energy: 1.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.2
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  trajectory_folder: degron
+  raw_output_path: degron/contact_map.npy
+  oe_output_path: degron/contact_map_oe.npy
+  viz_output_path: degron/contact_map_oe.png
+  map_starts: [0, 450, 900, 1350, 1800, 2250, 2700, 3150, 3600, 4050]
+  map_size: 450
+  cutoff: 5.0
+  num_processes: 6
+  verbose: true
+
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 200
+        tol: 1.0e-6
+        ignore_diagonals: 1
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150
+        
