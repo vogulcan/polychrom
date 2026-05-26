@@ -20,6 +20,8 @@ def _empty_ctcf() -> Dict[int, Dict[int, float]]:
 def _base_args(cfg: LEFConfig) -> Dict[str, Any]:
     return {
         "N": cfg.num_sites,
+        "chain_length": cfg.chain_length,
+        "num_chains": cfg.num_chains,
         "LIFETIME": cfg.lifetime,
         "LIFETIME_STALLED": cfg.lifetime_stalled,
         "ctcfCapture": _empty_ctcf(),

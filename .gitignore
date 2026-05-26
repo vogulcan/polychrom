@@ -12,3 +12,4 @@ polychrom/*.so
 .venv
 supplementary_material_clean.txt
 runs
+__pycache__

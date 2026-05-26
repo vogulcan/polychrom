@@ -26,6 +26,7 @@ def default_force_builder(
     angle_k: float = 1.5,
     repulsive_trunc: float = 1.5,
     repulsive_radius_mult: float = 1.05,
+    restrict_nonbonded_to_chains: bool = False,
 ) -> None:
     """Build a polymer with harmonic bonds, angles, polynomial repulsion.
 
@@ -36,6 +37,14 @@ def default_force_builder(
         (chain_idx * chain_length, (chain_idx + 1) * chain_length, False)
         for chain_idx in range(num_chains)
     ]
+    nonbonded_force_func = forces.polynomial_repulsive
+    if restrict_nonbonded_to_chains:
+        nonbonded_force_func = _chain_restricted_nonbonded(
+            nonbonded_force_func,
+            num_chains=num_chains,
+            chain_length=chain_length,
+        )
+
     sim.add_force(
         forcekits.polymer_chains(
             sim,
@@ -47,7 +56,7 @@ def default_force_builder(
             },
             angle_force_func=forces.angle_force,
             angle_force_kwargs={"k": angle_k},
-            nonbonded_force_func=forces.polynomial_repulsive,
+            nonbonded_force_func=nonbonded_force_func,
             nonbonded_force_kwargs={
                 "trunc": repulsive_trunc,
                 "radiusMult": repulsive_radius_mult,
@@ -94,6 +103,37 @@ def _expand_ep_pairs_across_chains(
     return expanded
 
 
+def _add_chain_interaction_groups(
+    nonbonded_force,
+    *,
+    num_chains: int,
+    chain_length: int,
+):
+    """Restrict a nonbonded force to intra-chain pairs only."""
+    if not hasattr(nonbonded_force, "addInteractionGroup"):
+        raise TypeError(
+            f"{getattr(nonbonded_force, 'name', type(nonbonded_force).__name__)} "
+            "does not support interaction groups"
+        )
+    for chain_idx in range(num_chains):
+        start = chain_idx * chain_length
+        group = set(range(start, start + chain_length))
+        nonbonded_force.addInteractionGroup(group, group)
+    return nonbonded_force
+
+
+def _chain_restricted_nonbonded(force_func, *, num_chains: int, chain_length: int):
+    def build(sim, **kwargs):
+        force = force_func(sim, **kwargs)
+        return _add_chain_interaction_groups(
+            force,
+            num_chains=num_chains,
+            chain_length=chain_length,
+        )
+
+    return build
+
+
 def paper_force_builder(
     sim,
     *,
@@ -114,6 +154,7 @@ def paper_force_builder(
     selective_repulsion_energy: float = 0.0,
     confinement_density: float = 0.2,
     confinement_k: float = 5.0,
+    restrict_nonbonded_to_chains: bool = False,
 ) -> None:
     """Force kit from Nat. Rev. Mol. Cell Biol. supplementary box 1.
 
@@ -175,6 +216,13 @@ def paper_force_builder(
             "selectiveAttractionEnergy": selective_attraction_energy,
             "selectiveRepulsionEnergy": selective_repulsion_energy,
         }
+
+    if restrict_nonbonded_to_chains:
+        nonbonded_force_func = _chain_restricted_nonbonded(
+            nonbonded_force_func,
+            num_chains=num_chains,
+            chain_length=chain_length,
+        )
 
     sim.add_force(
         forcekits.polymer_chains(

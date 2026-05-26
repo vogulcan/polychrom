@@ -40,6 +40,19 @@ STATE_PAUSED = 1
 STATE_ELONGATING = 2
 
 
+def _chain_length(args: Dict) -> int:
+    return int(args.get("chain_length", args["N"]))
+
+
+def _same_chain(a: int, b: int, args: Dict) -> bool:
+    chain_length = _chain_length(args)
+    return int(a) // chain_length == int(b) // chain_length
+
+
+def _valid_step(pos: int, target: int, args: Dict) -> bool:
+    return 0 <= target < args["N"] and _same_chain(pos, target, args)
+
+
 @dataclass
 class Gene:
     """A single transcription unit on the lattice."""
@@ -194,9 +207,8 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
     TES slot even if a cohesin sits there (bypass slot).
     """
     rnapii_by_pos = args["rnapii_by_pos"]
-    n_sites = args["N"]
     target = r.pos + r.direction
-    if not (0 <= target < n_sites):
+    if not _valid_step(r.pos, target, args):
         return False
 
     if target == gene.tes:
@@ -218,7 +230,7 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
             return False
         # push / pass: try to displace the leg backward (in RNAPII's direction).
         behind = target + r.direction
-        if not (0 <= behind < n_sites and occupied[behind] == FREE):
+        if not (_valid_step(target, behind, args) and occupied[behind] == FREE):
             return False
         occupied[behind] = COHESIN
         occupied[target] = RNAPII_CELL

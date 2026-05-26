@@ -14,6 +14,14 @@ from typing import Dict, List
 import numpy as np
 
 
+FREE = 0
+COHESIN = 1
+RNAPII_CELL = 2
+STATE_POISED = 0
+STATE_PAUSED = 1
+STATE_ELONGATING = 2
+
+
 class Leg:
     """One end of a cohesin."""
 
@@ -51,6 +59,19 @@ class Cohesin:
 # Default mechanic plugins
 # ---------------------------------------------------------------------------
 
+def _chain_length(args: Dict) -> int:
+    return int(args.get("chain_length", args["N"]))
+
+
+def _same_chain(a: int, b: int, args: Dict) -> bool:
+    chain_length = _chain_length(args)
+    return int(a) // chain_length == int(b) // chain_length
+
+
+def _valid_step(pos: int, target: int, args: Dict) -> bool:
+    return 0 <= target < args["N"] and _same_chain(pos, target, args)
+
+
 def unload_prob(cohesin: Cohesin, args: Dict) -> float:
     """Per-step unload probability. Stalled (not at CTCF) cohesins die faster."""
     if cohesin.any("stalled") and not cohesin.any("CTCF"):
@@ -59,15 +80,26 @@ def unload_prob(cohesin: Cohesin, args: Dict) -> float:
 
 
 def load_one(cohesins: List[Cohesin], occupied: np.ndarray, args: Dict) -> None:
-    """Randomly place a single cohesin onto two adjacent empty sites."""
+    """Randomly place one cohesin onto two adjacent same-chain empty sites."""
     n = args["N"]
-    while True:
+    for _ in range(max(100, 2 * n)):
         a = np.random.randint(n - 1)
-        if occupied[a] == 0 and occupied[a + 1] == 0:
-            occupied[a] = 1
-            occupied[a + 1] = 1
+        if not _same_chain(a, a + 1, args):
+            continue
+        if occupied[a] == FREE and occupied[a + 1] == FREE:
+            occupied[a] = COHESIN
+            occupied[a + 1] = COHESIN
             cohesins.append(Cohesin(Leg(a), Leg(a + 1)))
             return
+    for a in range(n - 1):
+        if not _same_chain(a, a + 1, args):
+            continue
+        if occupied[a] == FREE and occupied[a + 1] == FREE:
+            occupied[a] = COHESIN
+            occupied[a + 1] = COHESIN
+            cohesins.append(Cohesin(Leg(a), Leg(a + 1)))
+            return
+    raise RuntimeError("No same-chain adjacent empty sites available for cohesin loading")
 
 
 def capture(cohesin: Cohesin, occupied: np.ndarray, args: Dict) -> Cohesin:
@@ -127,21 +159,13 @@ def translocate(
             if leg.attrs["CTCF"]:
                 continue
             target = leg.pos + side
-            if not (0 <= target < args["N"]) or occupied[target] != 0:
+            if not _valid_step(leg.pos, target, args) or occupied[target] != FREE:
                 leg.attrs["stalled"] = True
                 continue
             leg.attrs["stalled"] = False
-            occupied[leg.pos] = 0
-            occupied[target] = 1
+            occupied[leg.pos] = FREE
+            occupied[target] = COHESIN
             leg.pos = target
-
-
-FREE = 0
-COHESIN = 1
-RNAPII_CELL = 2
-STATE_POISED = 0
-STATE_PAUSED = 1
-STATE_ELONGATING = 2
 
 
 def _rnapii_blocks_cohesin(rnapii, args: Dict) -> bool:
@@ -214,7 +238,7 @@ def translocate_with_rnapii(
             if leg.attrs.get("CTCF"):
                 continue
             target = leg.pos + side
-            if not (0 <= target < args["N"]):
+            if not _valid_step(leg.pos, target, args):
                 leg.attrs["stalled"] = True
                 continue
 

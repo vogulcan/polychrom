@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import pytest
 
 from polychrom.pipelines.loop_extrusion import lef as lef_stage
 from polychrom.pipelines.loop_extrusion import contacts as contacts_stage
@@ -20,13 +21,17 @@ from polychrom.pipelines.loop_extrusion.plugins.lef_dynamics import (
     RNAPII_CELL,
     Cohesin,
     Leg,
+    load_one,
+    translocate,
     translocate_with_rnapii,
 )
 from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
+    Gene,
     RNAPII,
     STATE_ELONGATING,
     STATE_PAUSED,
     STATE_POISED,
+    translocate_rnapii,
 )
 from polychrom.pipelines.loop_extrusion.plugins import (
     forces as force_plugins,
@@ -189,6 +194,82 @@ def test_legacy_rnapii_block_probability_is_state_fallback():
 
     assert cohesins[0].left.pos == 2
     assert not cohesins[0].left.attrs["stalled"]
+
+
+def _two_chain_args():
+    return {
+        "N": 6,
+        "chain_length": 3,
+        "num_chains": 2,
+        "LIFETIME": 10**9,
+        "LIFETIME_STALLED": 10**9,
+        "ctcfCapture": {-1: {}, 1: {}},
+        "ctcfRelease": {-1: {}, 1: {}},
+    }
+
+
+def test_load_one_rejects_cross_chain_adjacent_pair():
+    occupied = np.ones(6, dtype=np.int8)
+    occupied[2] = 0
+    occupied[3] = 0
+
+    with pytest.raises(RuntimeError):
+        load_one([], occupied, _two_chain_args())
+
+
+def test_translocate_respects_chain_boundary():
+    occupied = np.zeros(6, dtype=np.int8)
+    left = Leg(3)
+    right = Leg(4)
+    cohesins = [Cohesin(left, right)]
+    occupied[3] = COHESIN
+    occupied[4] = COHESIN
+
+    translocate(cohesins, occupied, _two_chain_args(), unload_prob_fn=lambda *_: 0.0)
+
+    assert left.pos == 3
+    assert left.attrs["stalled"]
+
+
+def test_translocate_with_rnapii_respects_chain_boundary():
+    occupied = np.zeros(6, dtype=np.int8)
+    left = Leg(3)
+    right = Leg(4)
+    cohesins = [Cohesin(left, right)]
+    occupied[3] = COHESIN
+    occupied[4] = COHESIN
+    args = _two_chain_args()
+    args.update({
+        "rnapii_by_pos": {},
+        "tes_by_pos": {},
+        "cohesin_leg_by_pos": {3: left, 4: right},
+    })
+
+    translocate_with_rnapii(cohesins, occupied, args, unload_prob_fn=lambda *_: 0.0)
+
+    assert left.pos == 3
+    assert left.attrs["stalled"]
+
+
+def test_rnapii_push_respects_chain_boundary():
+    occupied = np.zeros(6, dtype=np.int8)
+    leg = Leg(2)
+    rnap = RNAPII(pos=1, gene_id=0, direction=1)
+    occupied[1] = RNAPII_CELL
+    occupied[2] = COHESIN
+    args = _two_chain_args()
+    args.update({
+        "genes": [Gene(gene_id=0, tss=1, tes=4, direction=1, load_prob=0.0)],
+        "rnapii_by_pos": {1: rnap},
+        "cohesin_leg_by_pos": {2: leg},
+        "rnapii_stall_prob": 0.0,
+        "rnapii_push_prob": 1.0,
+    })
+
+    translocate_rnapii([rnap], [], occupied, args)
+
+    assert rnap.pos == 1
+    assert leg.pos == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -435,6 +516,58 @@ def test_paper_force_builder_can_replicate_ep_pairs_across_chains(monkeypatch):
     ]
     for enhancer, promoter in expected_pairs:
         assert interaction_matrix[monomer_types[enhancer], monomer_types[promoter]] == 1.0
+
+
+def test_paper_force_builder_can_restrict_nonbonded_to_chains(monkeypatch):
+    captured = {}
+
+    class DummyForce:
+        name = "dummy_nonbonded"
+
+        def __init__(self):
+            self.groups = []
+
+        def addInteractionGroup(self, set1, set2):
+            self.groups.append((tuple(sorted(set1)), tuple(sorted(set2))))
+            return len(self.groups) - 1
+
+    class DummySim:
+        N = 12
+
+        def add_force(self, force):
+            pass
+
+    def fake_heteropolymer_ssw(sim, **kwargs):
+        force = DummyForce()
+        captured["force"] = force
+        return force
+
+    def fake_polymer_chains(sim, **kwargs):
+        nb_force = kwargs["nonbonded_force_func"](
+            sim,
+            **kwargs["nonbonded_force_kwargs"],
+        )
+        captured["groups"] = nb_force.groups
+        return object()
+
+    monkeypatch.setattr(force_plugins.forces, "heteropolymer_SSW", fake_heteropolymer_ssw)
+    monkeypatch.setattr(force_plugins.forcekits, "polymer_chains", fake_polymer_chains)
+    monkeypatch.setattr(force_plugins.forces, "spherical_confinement", lambda *args, **kwargs: object())
+
+    force_plugins.paper_force_builder(
+        DummySim(),
+        num_chains=3,
+        chain_length=4,
+        ep_pairs=[[1, 2]],
+        replicate_ep_pairs_across_chains=True,
+        restrict_nonbonded_to_chains=True,
+    )
+
+    assert captured["groups"] == [
+        ((0, 1, 2, 3), (0, 1, 2, 3)),
+        ((4, 5, 6, 7), (4, 5, 6, 7)),
+        ((8, 9, 10, 11), (8, 9, 10, 11)),
+    ]
 
 
 def test_build_payload_promoter_direction_follows_gene(tmp_path):

@@ -13,11 +13,8 @@ from .plugins.lef_dynamics import Cohesin
 
 
 def initial_state(cfg: LEFConfig, args: dict, load_fn) -> tuple[np.ndarray, List[Cohesin]]:
-    """Build occupancy + cohesin list, pin chain endpoints as forbidden."""
+    """Build occupancy + cohesin list."""
     occupied = np.zeros(cfg.num_sites, dtype=np.int8)
-    for chain_idx in range(cfg.num_chains):
-        occupied[chain_idx * cfg.chain_length] = 1
-        occupied[(chain_idx + 1) * cfg.chain_length - 1] = 1
 
     cohesins: List[Cohesin] = []
     for _ in range(cfg.num_lefs):
