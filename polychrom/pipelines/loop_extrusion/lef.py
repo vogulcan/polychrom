@@ -44,8 +44,14 @@ def _advance_one_step(
     load_fn,
     capture_fn,
     release_fn,
+    lesion_update_fn=None,
 ) -> None:
     """Advance one 1D dynamics tick for warmup or recording."""
+    # Lesions update first: occurrence + repair before cohesin / RNAPII move,
+    # so the new lesion landscape is what the polymers see this tick.
+    if lesion_update_fn is not None:
+        lesion_update_fn(args)
+
     if rnapii_enabled:
         if args.get("genes"):
             tol = int(args.get("ep_contact_tolerance", 2))
@@ -91,6 +97,9 @@ def run(cfg: LEFConfig) -> Path:
         resolve_plugin(plugins.rnapii_translocate) if rnapii_enabled else None
     )
 
+    lesion_enabled = plugins.lesion is not None
+    lesion_update_fn = resolve_plugin(plugins.lesion) if lesion_enabled else None
+
     args = topology_fn(cfg, **cfg.topology_kwargs)
 
     occupied, cohesins = initial_state(cfg, args, load_fn)
@@ -110,6 +119,7 @@ def run(cfg: LEFConfig) -> Path:
             load_fn=load_fn,
             capture_fn=capture_fn,
             release_fn=release_fn,
+            lesion_update_fn=lesion_update_fn,
         )
 
     out_path = Path(cfg.output_path)
@@ -145,6 +155,17 @@ def run(cfg: LEFConfig) -> Path:
                 fillvalue=-1,
             )
 
+        lesion_max = int(args.get("lesion_max", 64))
+        dset_lesions = None
+        if lesion_enabled:
+            dset_lesions = fh.create_dataset(
+                "lesions",
+                shape=(traj_len, lesion_max),
+                dtype=np.int32,
+                compression="gzip",
+                fillvalue=-1,
+            )
+
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             if end == start:
                 continue
@@ -158,6 +179,11 @@ def run(cfg: LEFConfig) -> Path:
             sbuf = (
                 np.full((n_step, cfg.max_rnapii), -1, dtype=np.int8)
                 if rnapii_enabled
+                else None
+            )
+            lbuf = (
+                np.full((n_step, lesion_max), -1, dtype=np.int32)
+                if lesion_enabled
                 else None
             )
 
@@ -175,6 +201,7 @@ def run(cfg: LEFConfig) -> Path:
                     load_fn=load_fn,
                     capture_fn=capture_fn,
                     release_fn=release_fn,
+                    lesion_update_fn=lesion_update_fn,
                 )
 
                 for j, coh in enumerate(cohesins):
@@ -187,10 +214,16 @@ def run(cfg: LEFConfig) -> Path:
                         rbuf[i, j, 1] = r.gene_id
                         sbuf[i, j] = r.attrs.get("state", -1)
 
+                if lbuf is not None:
+                    for j, site in enumerate(sorted(args["lesions"])[:lesion_max]):
+                        lbuf[i, j] = site
+
             dset[start:end] = buffer
             if dset_rnapii is not None:
                 dset_rnapii[start:end] = rbuf
                 dset_states[start:end] = sbuf
+            if dset_lesions is not None:
+                dset_lesions[start:end] = lbuf
 
         fh.attrs["N"] = cfg.num_sites
         fh.attrs["LEFNum"] = n_lefs
@@ -203,6 +236,12 @@ def run(cfg: LEFConfig) -> Path:
         if cfg.seed is not None:
             fh.attrs["seed"] = int(cfg.seed)
         fh.attrs["rnapii_enabled"] = bool(rnapii_enabled)
+        fh.attrs["lesion_enabled"] = bool(lesion_enabled)
+        if lesion_enabled:
+            fh.attrs["lesion_max"] = lesion_max
+            fh.attrs["lesion_prob"] = float(args.get("lesion_prob", 0.0))
+            fh.attrs["lesion_lifetime"] = int(args.get("lesion_lifetime", 0))
+            fh.attrs["lesion_block_prob"] = float(args.get("lesion_block_prob", 0.0))
         if rnapii_enabled:
             fh.attrs["max_rnapii"] = cfg.max_rnapii
             genes = args.get("genes", [])

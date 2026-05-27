@@ -111,6 +111,30 @@ def _expand_genes_across_chains(
     return expanded
 
 
+def _set_loading_sites(
+    args: Dict[str, Any],
+    gene_objs,
+    *,
+    targeted_load_prob: float,
+    loading_window: int,
+    target_enhancers: bool,
+    target_tss: bool,
+) -> None:
+    """Populate ``args`` with targeted cohesin-loading sites (enhancers/TSS).
+
+    Consumed by ``lef_dynamics.load_targeted``. ``targeted_load_prob == 0``
+    (default) leaves loading uniform even if this is called.
+    """
+    sites: set = set()
+    if target_enhancers:
+        sites |= {g.enhancer_pos for g in gene_objs if g.enhancer_pos is not None}
+    if target_tss:
+        sites |= {g.tss for g in gene_objs}
+    args["loading_sites"] = sorted(int(s) for s in sites)
+    args["targeted_load_prob"] = float(targeted_load_prob)
+    args["loading_window"] = int(loading_window)
+
+
 def convergent_tad_topology(
     cfg: LEFConfig,
     *,
@@ -153,10 +177,19 @@ def gene_aware_topology(
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
+    rnapii_terminating_block_prob: Optional[float] = None,
     rnapii_block_prob: float = 1.0,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
     replicate_genes_across_chains: bool = False,
+    targeted_load_prob: float = 0.0,
+    loading_window: int = 2,
+    target_enhancers: bool = True,
+    target_tss: bool = True,
+    lesion_prob: float = 0.0,
+    lesion_lifetime: int = 100,
+    lesion_block_prob: float = 0.95,
+    lesion_max: int = 64,
 ) -> Dict[str, Any]:
     """CTCF TAD layout + per-gene transcription units.
 
@@ -203,8 +236,27 @@ def gene_aware_topology(
         if rnapii_elongating_block_prob is None
         else float(rnapii_elongating_block_prob)
     )
+    # Terminating Pol II defaults to the paused block prob (both stationary).
+    args["rnapii_terminating_block_prob"] = (
+        args["rnapii_paused_block_prob"]
+        if rnapii_terminating_block_prob is None
+        else float(rnapii_terminating_block_prob)
+    )
     args["rnapii_block_prob"] = fallback_block_prob
     args["ep_contact_tolerance"] = int(ep_contact_tolerance)
+    _set_loading_sites(
+        args, gene_objs,
+        targeted_load_prob=targeted_load_prob,
+        loading_window=loading_window,
+        target_enhancers=target_enhancers,
+        target_tss=target_tss,
+    )
+    # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
+    args["lesions"] = {}
+    args["lesion_prob"] = float(lesion_prob)
+    args["lesion_lifetime"] = int(lesion_lifetime)
+    args["lesion_block_prob"] = float(lesion_block_prob)
+    args["lesion_max"] = int(lesion_max)
     return args
 
 
@@ -223,10 +275,19 @@ def gene_aware_convergent_tad_topology(
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
+    rnapii_terminating_block_prob: Optional[float] = None,
     rnapii_block_prob: float = 1.0,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
     replicate_genes_across_chains: bool = False,
+    targeted_load_prob: float = 0.0,
+    loading_window: int = 2,
+    target_enhancers: bool = True,
+    target_tss: bool = True,
+    lesion_prob: float = 0.0,
+    lesion_lifetime: int = 100,
+    lesion_block_prob: float = 0.95,
+    lesion_max: int = 64,
 ) -> Dict[str, Any]:
     """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
     args = convergent_tad_topology(
@@ -264,8 +325,27 @@ def gene_aware_convergent_tad_topology(
         if rnapii_elongating_block_prob is None
         else float(rnapii_elongating_block_prob)
     )
+    # Terminating Pol II defaults to the paused block prob (both stationary).
+    args["rnapii_terminating_block_prob"] = (
+        args["rnapii_paused_block_prob"]
+        if rnapii_terminating_block_prob is None
+        else float(rnapii_terminating_block_prob)
+    )
     args["rnapii_block_prob"] = fallback_block_prob
     args["ep_contact_tolerance"] = int(ep_contact_tolerance)
+    _set_loading_sites(
+        args, gene_objs,
+        targeted_load_prob=targeted_load_prob,
+        loading_window=loading_window,
+        target_enhancers=target_enhancers,
+        target_tss=target_tss,
+    )
+    # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
+    args["lesions"] = {}
+    args["lesion_prob"] = float(lesion_prob)
+    args["lesion_lifetime"] = int(lesion_lifetime)
+    args["lesion_block_prob"] = float(lesion_block_prob)
+    args["lesion_max"] = int(lesion_max)
     return args
 
 

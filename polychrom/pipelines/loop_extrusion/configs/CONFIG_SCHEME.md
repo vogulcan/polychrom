@@ -180,6 +180,41 @@ Important caveat:
 This is biologically scaled but sparse, so TAD contact maps can look weaker
 than older toy configs with `separation: 50` and 32 cohesins.
 
+### Targeted Cohesin Loading
+
+By default `plugins.load = lef_dynamics:load_one` loads cohesins at uniformly
+random free sites. Swap in `lef_dynamics:load_targeted` to bias loading toward
+active enhancers / TSS, modelling NIPBL/MAU2-mediated targeted loading at active
+enhancers (Fursova & Larson 2024, Fig 4b):
+
+```yaml
+plugins:
+  load: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
+topology_kwargs:
+  targeted_load_prob: 0.3   # fraction of (re)loads that are targeted (0 = uniform)
+  loading_window: 2         # place within +/- this many sites of a loading site
+  target_enhancers: true    # include each gene's enhancer_pos as a loading site
+  target_tss: true          # include each gene's TSS as a loading site
+```
+
+Mechanics: the gene-aware topology writes the loading sites (enhancers/TSS) to
+`args["loading_sites"]`. Each (re)load: with probability `targeted_load_prob`,
+place the cohesin on a free adjacent pair within `loading_window` of a random
+loading site (searching outward from it); otherwise, or if that neighbourhood
+is full, fall back to uniform `load_one`. Targeted placement is constrained to
+the loading site's **own chain**, so a site near a chain boundary never spills a
+cohesin into a replicate chain (no inter-chain events).
+
+This is the dominant lever for transcription-shaped cohesin (fountains at load
+sites) -- far stronger than barrier strength. But mind the geometry: a cohesin
+loaded **at** an enhancer forms a fountain that loops the enhancer **out**, and
+if `lifetime` (in sites) is shorter than the E-P distance it dies before its leg
+bridges to the cognate promoter. With the preUV geometry (E-P = 250 kb,
+processivity-limited reach ~150 sites) high `targeted_load_prob` therefore
+**suppresses** E-P contact (measured: `0.6` -> ~5x fewer E-P-contact ticks vs
+uniform). Use a moderate value, shorten the E-P distance, or raise `lifetime`
+if you want targeted loading to *promote* rather than insulate a given E-P pair.
+
 ### Cohesin Lifetime and Processivity
 
 ```yaml

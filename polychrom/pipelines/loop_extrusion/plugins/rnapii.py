@@ -19,9 +19,13 @@ Lattice encoding (``occupied``)::
 RNAPII state codes (stored in ``RNAPII.attrs["state"]`` and the optional
 ``rnapii_states`` HDF5 dataset)::
 
-    0 = POISED      (bound at TSS, not yet initiated)
-    1 = PAUSED      (initiated, promoter-proximal pause)
-    2 = ELONGATING  (productive elongation)
+    0 = POISED       (bound at TSS, not yet initiated)
+    1 = PAUSED       (initiated, promoter-proximal pause)
+    2 = ELONGATING   (productive elongation)
+    3 = TERMINATING  (reached TES, dwelling there before unloading)
+
+POISED, PAUSED and TERMINATING Pol II are stationary blocks to cohesin;
+only ELONGATING Pol II can push it (Fursova & Larson 2024, Fig 3a).
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ RNAPII_CELL = 2
 STATE_POISED = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
+STATE_TERMINATING = 3
 
 
 def _chain_length(args: Dict) -> int:
@@ -69,6 +74,7 @@ class Gene:
     pause_release_prob: float = 1.0         # PAUSED  -> ELONGATING per tick
     elongation_step_prob: float = 1.0       # per-tick step prob during ELONGATING
     pause_offset: int = 0                   # PAUSED site = TSS + direction*pause_offset
+    termination_prob: float = 1.0           # TERMINATING -> unload per tick (1.0 = no dwell)
 
 
 class RNAPII:
@@ -122,6 +128,7 @@ def build_genes(
             pause_release_prob=float(spec.get("pause_release_prob", 1.0)),
             elongation_step_prob=float(spec.get("elongation_step_prob", 1.0)),
             pause_offset=int(spec.get("pause_offset", 0)),
+            termination_prob=float(spec.get("termination_prob", 1.0)),
         ))
     return genes
 
@@ -237,6 +244,13 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
     if not _valid_step(r.pos, target, args):
         return False
 
+    # A lesion blocks RNAPII -- it cannot transcribe through the damage and
+    # stalls just upstream (lesion-stalled Pol II).
+    lesions = args.get("lesions")
+    if lesions and target in lesions:
+        r.attrs["lesion_stalled"] = True
+        return False
+
     if target == gene.tes:
         rnapii_by_pos.pop(r.pos, None)
         if occupied[r.pos] == RNAPII_CELL:
@@ -327,11 +341,14 @@ def stateful_translocate_rnapii(
     occupied: np.ndarray,
     args: Dict,
 ) -> None:
-    """v2 RNAPII dynamics with POISED/PAUSED/ELONGATING states.
+    """v2 RNAPII dynamics with POISED/PAUSED/ELONGATING/TERMINATING states.
 
     Per tick (per RNAPII):
 
-    * Unload at TES (existing one-tick dwell + cohesin bypass behaviour).
+    * **At TES**: enter TERMINATING and dwell there as a stationary block
+      (Fursova & Larson 2024, Fig 3a: terminating Pol II blocks cohesin,
+      giving TES accumulation). Unload with probability
+      ``gene.termination_prob`` (``1.0`` = old one-tick behaviour).
     * **POISED**: with probability ``gene.initiation_prob`` transition to
       PAUSED; if ``gene.pause_offset > 0`` and the pause site is free,
       hop there. Otherwise PAUSE in place.
@@ -351,8 +368,12 @@ def stateful_translocate_rnapii(
         r = rnapiis[idx]
         gene = genes[r.gene_id]
 
-        if _unload_at_tes(r, gene, occupied, args):
-            del rnapiis[idx]
+        # At TES: terminating Pol II dwells as a stationary block, then unloads.
+        if r.pos == gene.tes:
+            r.attrs["state"] = STATE_TERMINATING
+            if np.random.random() < gene.termination_prob:
+                _unload_at_tes(r, gene, occupied, args)
+                del rnapiis[idx]
             continue
 
         state = r.attrs.get("state", STATE_POISED)

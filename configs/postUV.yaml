@@ -3,7 +3,7 @@ lef:
   num_chains: 1
   # Must match preUV.yaml: preUV vs postUV is a transcription ON/OFF control, so
   # cohesin density and CTCF must be identical -- only RNAPII/E-P differs.
-  separation: 120
+  separation: 80
   lifetime: 150
   lifetime_stalled: 150
   warmup_steps: 10000
@@ -14,7 +14,9 @@ lef:
   output_path: /home/ogulcan/polychrom/runs/postUV/LEFPositions.h5
 
   topology_kwargs:
-    tad_positions: [200, 600]
+    # Same 5 equal 160 kb TADs as preUV (must match: only transcription differs
+    # between the two). No genes / RNAPII / E-P here -> transcription fully off.
+    tad_positions: [160, 320, 480, 640]
     boundary_strength: 0.5
     release_prob: 0.0
     include_chromosome_ends: true

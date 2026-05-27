@@ -91,6 +91,10 @@ class LEFPlugins:
     # to ``translocate_with_rnapii`` so cohesin honours RNAPII presence.
     rnapii_load: Optional[PluginSpec] = None
     rnapii_translocate: Optional[PluginSpec] = None
+    # Optional lesion (DNA-damage) slot. When set, lef.run() updates lesions
+    # each step (occurrence in gene bodies + stochastic repair); cohesin and
+    # RNAPII then honour lesion sites as barriers.
+    lesion: Optional[PluginSpec] = None
 
 
 @dataclass

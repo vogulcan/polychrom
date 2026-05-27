@@ -20,6 +20,7 @@ RNAPII_CELL = 2
 STATE_POISED = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
+STATE_TERMINATING = 3
 
 
 class Leg:
@@ -108,6 +109,46 @@ def load_one(cohesins: List[Cohesin], occupied: np.ndarray, args: Dict) -> None:
     raise RuntimeError("No same-chain adjacent empty sites available for cohesin loading")
 
 
+def _try_place(cohesins: List[Cohesin], occupied: np.ndarray, args: Dict, a: int) -> bool:
+    """Place a cohesin on the adjacent pair ``(a, a+1)`` if both free + same chain."""
+    n = args["N"]
+    if 0 <= a and a + 1 < n and _same_chain(a, a + 1, args) \
+            and occupied[a] == FREE and occupied[a + 1] == FREE:
+        occupied[a] = COHESIN
+        occupied[a + 1] = COHESIN
+        cohesins.append(Cohesin(Leg(a), Leg(a + 1)))
+        return True
+    return False
+
+
+def load_targeted(cohesins: List[Cohesin], occupied: np.ndarray, args: Dict) -> None:
+    """Bias cohesin loading toward active enhancers / TSS (targeted loading).
+
+    Models NIPBL/MAU2-mediated targeted cohesin loading at active enhancers
+    (Fursova & Larson 2024, Fig 4b): with probability ``targeted_load_prob`` the
+    cohesin is placed at a free adjacent pair within ``loading_window`` sites of
+    a random loading site (``args["loading_sites"]`` -- enhancers/TSS populated
+    by the topology). Otherwise, or if every nearby slot is occupied, it falls
+    back to uniform :func:`load_one`. With no loading sites or
+    ``targeted_load_prob == 0`` this is identical to :func:`load_one`.
+    """
+    sites = args.get("loading_sites") or []
+    p = float(args.get("targeted_load_prob", 0.0))
+    if sites and np.random.random() < p:
+        window = int(args.get("loading_window", 2))
+        site = int(sites[np.random.randint(len(sites))])
+        # Search outward from the target: (site, site+1), then +/- offsets.
+        # `_same_chain(a, site)` keeps the placement inside the target site's own
+        # chain -- a site near a chain boundary must never spill the cohesin into
+        # a neighbouring replicate chain.
+        for off in range(window + 1):
+            for a in ((site + off, site - off) if off else (site + off,)):
+                if _same_chain(a, site, args) and _try_place(cohesins, occupied, args, a):
+                    return
+        # Target neighbourhood fully occupied -> fall back to uniform.
+    load_one(cohesins, occupied, args)
+
+
 def capture(cohesin: Cohesin, occupied: np.ndarray, args: Dict) -> Cohesin:
     """Stochastically capture each leg at its side's CTCF site."""
     for side in (-1, 1):
@@ -187,6 +228,15 @@ def _rnapii_blocks_cohesin(rnapii, args: Dict) -> bool:
         prob = float(
             args.get("rnapii_elongating_block_prob", args.get("rnapii_block_prob", 1.0))
         )
+    elif state == STATE_TERMINATING:
+        # Terminating Pol II is a stationary block (like paused); default to the
+        # paused block prob if a terminating-specific one isn't given.
+        prob = float(
+            args.get(
+                "rnapii_terminating_block_prob",
+                args.get("rnapii_paused_block_prob", args.get("rnapii_block_prob", 1.0)),
+            )
+        )
     else:
         prob = float(args.get("rnapii_block_prob", 1.0))
     return np.random.random() < prob
@@ -214,6 +264,8 @@ def translocate_with_rnapii(
     leg_by_pos: Dict[int, "Leg"] = args.setdefault("cohesin_leg_by_pos", {})
     tes_by_pos: Dict[int, int] = args.get("tes_by_pos", {})
     rnapii_by_pos = args.get("rnapii_by_pos", {})
+    lesions = args.get("lesions")
+    lesion_block_prob = float(args.get("lesion_block_prob", 1.0))
 
     # 1. Unload + reload.
     for i in range(len(cohesins) - 1, -1, -1):
@@ -245,6 +297,12 @@ def translocate_with_rnapii(
                 continue
             target = leg.pos + side
             if not _valid_step(leg.pos, target, args):
+                leg.attrs["stalled"] = True
+                continue
+
+            # A lesion blocks an incoming cohesin leg (per-tick stall prob).
+            # The other leg is unaffected, so the cohesin extrudes asymmetrically.
+            if lesions and target in lesions and np.random.random() < lesion_block_prob:
                 leg.attrs["stalled"] = True
                 continue
 

@@ -22,6 +22,7 @@ from polychrom.pipelines.loop_extrusion.plugins.lef_dynamics import (
     Cohesin,
     Leg,
     load_one,
+    load_targeted,
     translocate,
     translocate_with_rnapii,
 )
@@ -31,7 +32,10 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     STATE_ELONGATING,
     STATE_PAUSED,
     STATE_POISED,
+    STATE_TERMINATING,
+    build_genes,
     load_rnapii,
+    stateful_translocate_rnapii,
     translocate_rnapii,
 )
 from polychrom.pipelines.loop_extrusion.plugins import (
@@ -280,6 +284,132 @@ def test_translocate_with_rnapii_respects_chain_boundary():
 
     assert left.pos == 3
     assert left.attrs["stalled"]
+
+
+def test_rnapii_terminates_at_tes_then_unloads():
+    # Pol II sitting on its TES enters TERMINATING and dwells (termination_prob
+    # < 1), then unloads once the roll succeeds.
+    gene = build_genes([{"tss": 10, "tes": 20, "termination_prob": 0.0}])[0]
+    occupied = np.zeros(40, dtype=np.int8)
+    r = RNAPII(pos=20, gene_id=0, direction=1)
+    r.attrs["state"] = STATE_ELONGATING
+    occupied[20] = RNAPII_CELL
+    args = {"N": 40, "chain_length": 40, "num_chains": 1, "genes": [gene],
+            "rnapii_by_pos": {20: r}, "cohesin_leg_by_pos": {}, "ep_contact_tolerance": 1}
+    rnapiis = [r]
+
+    # termination_prob 0 -> never unloads; dwells as TERMINATING block
+    for _ in range(5):
+        stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert len(rnapiis) == 1
+    assert r.attrs["state"] == STATE_TERMINATING
+    assert occupied[20] == RNAPII_CELL          # still blocking the TES site
+
+    # flip termination_prob to 1 -> unloads next tick
+    gene.termination_prob = 1.0
+    stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert len(rnapiis) == 0
+    assert occupied[20] == 0
+
+
+def test_terminating_pol_ii_blocks_cohesin():
+    from polychrom.pipelines.loop_extrusion.plugins.lef_dynamics import _rnapii_blocks_cohesin
+    r = RNAPII(pos=20, gene_id=0, direction=1)
+    r.attrs["state"] = STATE_TERMINATING
+    # explicit terminating block prob 1.0 -> always blocks
+    assert _rnapii_blocks_cohesin(r, {"rnapii_terminating_block_prob": 1.0}) is True
+    # falls back to paused block prob when terminating-specific absent
+    assert _rnapii_blocks_cohesin(r, {"rnapii_paused_block_prob": 1.0}) is True
+
+
+def test_lesion_repaired_after_lifetime():
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import update_lesions
+    args = {"genes": [], "lesions": {50: 2}, "lesion_prob": 0.0}
+    update_lesions(args)
+    assert args["lesions"] == {50: 1}
+    update_lesions(args)
+    assert args["lesions"] == {}                     # fully repaired
+
+
+def test_lesion_occurs_in_gene_body():
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import update_lesions
+    gene = build_genes([{"tss": 10, "tes": 20}])[0]
+    args = {"genes": [gene], "lesions": {}, "lesion_prob": 1.0,
+            "lesion_lifetime": 5, "lesion_max": 1}
+    np.random.seed(1)
+    update_lesions(args)
+    assert len(args["lesions"]) == 1
+    site = next(iter(args["lesions"]))
+    assert 10 <= site <= 20                          # inside the gene body
+    update_lesions(args)
+    assert len(args["lesions"]) <= 1                 # lesion_max respected
+
+
+def test_lesion_blocks_cohesin_leg_asymmetrically():
+    occupied = np.zeros(40, dtype=np.int8)
+    left = Leg(10); right = Leg(11)
+    coh = Cohesin(left, right)
+    occupied[10] = COHESIN; occupied[11] = COHESIN
+    args = {"N": 40, "chain_length": 40, "num_chains": 1,
+            "ctcfCapture": {-1: {}, 1: {}}, "ctcfRelease": {-1: {}, 1: {}},
+            "rnapii_by_pos": {}, "tes_by_pos": {}, "cohesin_leg_by_pos": {10: left, 11: right},
+            "lesions": {9: 5}, "lesion_block_prob": 1.0}
+    translocate_with_rnapii([coh], occupied, args, unload_prob_fn=lambda *_: 0.0)
+    assert left.pos == 10 and left.attrs["stalled"]   # blocked by lesion at 9
+    assert right.pos == 12                            # other leg extruded -> asymmetric
+
+
+def test_lesion_stalls_rnapii():
+    gene = build_genes([{"tss": 10, "tes": 20, "elongation_step_prob": 1.0}])[0]
+    occupied = np.zeros(40, dtype=np.int8)
+    r = RNAPII(pos=14, gene_id=0, direction=1)
+    r.attrs["state"] = STATE_ELONGATING
+    occupied[14] = RNAPII_CELL
+    args = {"N": 40, "chain_length": 40, "num_chains": 1, "genes": [gene],
+            "rnapii_by_pos": {14: r}, "cohesin_leg_by_pos": {},
+            "lesions": {15: 5}, "ep_contact_tolerance": 1}
+    rnapiis = [r]
+    for _ in range(5):
+        stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert r.pos == 14                                # cannot step onto lesion at 15
+    assert r.attrs.get("lesion_stalled")
+
+
+def test_load_targeted_places_near_loading_site():
+    occupied = np.zeros(100, dtype=np.int8)
+    args = {"N": 100, "chain_length": 100, "num_chains": 1,
+            "loading_sites": [50], "targeted_load_prob": 1.0, "loading_window": 2}
+    cohesins = []
+    np.random.seed(0)
+    load_targeted(cohesins, occupied, args)
+    assert len(cohesins) == 1
+    c = cohesins[0]
+    assert 48 <= c.left.pos <= 51          # within +/-window of site 50
+    assert c.right.pos == c.left.pos + 1
+
+
+def test_load_targeted_falls_back_to_uniform_when_no_sites():
+    occupied = np.zeros(50, dtype=np.int8)
+    args = {"N": 50, "chain_length": 50, "num_chains": 1,
+            "loading_sites": [], "targeted_load_prob": 1.0}
+    cohesins = []
+    load_targeted(cohesins, occupied, args)
+    assert len(cohesins) == 1               # still loaded (uniform fallback)
+
+
+def test_load_targeted_never_crosses_chain_boundary():
+    # site 49 is the last monomer of chain 0 (chains length 50). Targeting it
+    # must keep the cohesin entirely within chain 0, never spilling into chain 1.
+    occupied = np.zeros(100, dtype=np.int8)
+    args = {"N": 100, "chain_length": 50, "num_chains": 2,
+            "loading_sites": [49], "targeted_load_prob": 1.0, "loading_window": 3}
+    for seed in range(20):
+        cohesins = []
+        np.random.seed(seed)
+        load_targeted(cohesins, np.zeros(100, dtype=np.int8), args)
+        c = cohesins[0]
+        assert c.left.pos // 50 == c.right.pos // 50      # same chain
+        assert c.left.pos // 50 == 0                       # stayed in site's chain
 
 
 def test_rnapii_push_respects_chain_boundary():
