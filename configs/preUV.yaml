@@ -12,7 +12,7 @@ lef:
   chunk_size: 50
   seed: 1001
   max_rnapii: 128
-  output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
+  output_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
 
   topology_kwargs:
     tad_positions: [200, 600]
@@ -65,8 +65,8 @@ lef:
     rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
 
 viewer:
-  lef_positions_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
-  output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/bridging_viewer.html
+  lef_positions_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
+  output_path: /home/ogulcan/polychrom/runs/preUV/bridging_viewer.html
   max_frames: 10000
   bridge_cost: 1.0
   insulation_score_window: 50
@@ -74,8 +74,8 @@ viewer:
   site_end: 800
 
 polymer:
-  lef_positions_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
-  output_folder: /home/carlos/Clone/polychrom/viewer_outs/preUV
+  lef_positions_path: /home/ogulcan/polychrom/runs/preUV/LEFPositions.h5
+  output_folder: /home/ogulcan/polychrom/runs/preUV
 
   platform: cuda
   gpu: "0"
@@ -120,7 +120,7 @@ polymer:
         # gene bodies of genes carrying an elongating RNAPII self-attract.
         # Strength = multiple of selective_attraction_energy (here 2 x 1.0 = 2 kT).
         # Rides on the chain-restricted nonbonded force -> no cross-chain physics.
-        polii_self_affinity: 2.0
+        polii_self_affinity: 0.1
         selective_repulsion_energy: 0.0
         confinement_density: 0.2
         confinement_per_chain: true
@@ -129,10 +129,10 @@ polymer:
       target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
 
 contacts:
-  trajectory_folder: /home/carlos/Clone/polychrom/viewer_outs/preUV
-  raw_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map.npy
-  oe_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map_oe.npy
-  viz_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map_oe.png
+  trajectory_folder: /home/ogulcan/polychrom/runs/preUV
+  raw_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map.npy
+  oe_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map_oe.npy
+  viz_output_path: /home/ogulcan/polychrom/runs/preUV/contact_map_oe.png
   replicate_map_starts_across_chains: true
   map_starts: [0]
   map_size: 800
