@@ -64,6 +64,7 @@ class Gene:
     load_prob: float                        # per-tick recruitment to TSS
     enhancer_pos: Optional[int] = None      # required iff requires_enhancer
     requires_enhancer: bool = False
+    load_requires_enhancer: bool = False    # recruitment also requires E-P contact
     initiation_prob: float = 1.0            # POISED -> PAUSED per tick
     pause_release_prob: float = 1.0         # PAUSED  -> ELONGATING per tick
     elongation_step_prob: float = 1.0       # per-tick step prob during ELONGATING
@@ -116,6 +117,7 @@ def build_genes(
             load_prob=load_prob,
             enhancer_pos=enhancer_pos,
             requires_enhancer=requires_enhancer,
+            load_requires_enhancer=bool(spec.get("load_requires_enhancer", False)),
             initiation_prob=float(spec.get("initiation_prob", 1.0)),
             pause_release_prob=float(spec.get("pause_release_prob", 1.0)),
             elongation_step_prob=float(spec.get("elongation_step_prob", 1.0)),
@@ -171,7 +173,10 @@ def load_rnapii(rnapiis: List[RNAPII], occupied: np.ndarray, args: Dict) -> None
     """
     genes: List[Gene] = args["genes"]
     rnapii_by_pos: Dict[int, RNAPII] = args["rnapii_by_pos"]
+    ep_contacts = args.get("current_ep_contacts", set())
     for gene in genes:
+        if gene.load_requires_enhancer and gene.gene_id not in ep_contacts:
+            continue
         if np.random.random() >= gene.load_prob:
             continue
         if occupied[gene.tss] != FREE:
@@ -183,19 +188,40 @@ def load_rnapii(rnapiis: List[RNAPII], occupied: np.ndarray, args: Dict) -> None
         rnapiis.append(r)
 
 
-def _resolve_head_on(args: Dict) -> str:
-    """Roll the head-on encounter outcome.
+def _resolve_head_on(r: "RNAPII", leg, args: Dict) -> str:
+    """Resolve an RNAPII stepping into a cohesin leg.
 
-    Returns one of: ``"stall"``, ``"push"``, ``"pass"``.
+    Returns ``"stall"`` (RNAPII blocked, stays put) or ``"push"`` (RNAPII
+    advances, displacing the cohesin leg).
+
+    Biology (Fursova & Larson, *Curr. Opin. Struct. Biol.* 2024, Fig. 3a):
+
+    * Only ELONGATING RNAPII translocates productively, so only it can
+      push a cohesin. POISED / PAUSED RNAPII is a stationary block and
+      always stalls on contact -- it never displaces cohesin.
+    * An elongating RNAPII pushes a *co-directional* cohesin leg (rear
+      encounter) far more readily than a *head-on* (converging) leg, which
+      tends to stall or slow the polymerase.
+
+    Backwards-compatible defaults: a v1 single-state RNAPII carries no
+    ``state`` attr and is treated as always-elongating; a leg with no
+    recorded ``dir`` is treated as co-directional.
     """
-    stall_p = args["rnapii_stall_prob"]
-    push_p = args["rnapii_push_prob"]
-    r = np.random.random()
-    if r < stall_p:
+    state = r.attrs.get("state")
+    if state is not None and state != STATE_ELONGATING:
         return "stall"
-    if r < stall_p + push_p:
-        return "push"
-    return "pass"
+
+    # Intrinsic stall floor (Pol II pausing/slowing on any obstacle),
+    # applied regardless of orientation.
+    if np.random.random() < float(args.get("rnapii_stall_prob", 0.0)):
+        return "stall"
+
+    leg_dir = leg.attrs.get("dir") if leg is not None else None
+    head_on = leg_dir is not None and leg_dir == -r.direction
+    push_p = float(args.get(
+        "rnapii_headon_push_prob" if head_on else "rnapii_push_prob", 0.0
+    ))
+    return "push" if np.random.random() < push_p else "stall"
 
 
 def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) -> bool:
@@ -225,10 +251,10 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
         return False
 
     if cell == COHESIN:
-        outcome = _resolve_head_on(args)
-        if outcome == "stall":
+        leg = args["cohesin_leg_by_pos"].get(target)
+        if _resolve_head_on(r, leg, args) == "stall":
             return False
-        # push / pass: try to displace the leg backward (in RNAPII's direction).
+        # push: displace the co-directional leg backward (in RNAPII's direction).
         behind = target + r.direction
         if not (_valid_step(target, behind, args) and occupied[behind] == FREE):
             return False
@@ -237,7 +263,7 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
         rnapii_by_pos.pop(r.pos, None)
         if occupied[r.pos] == RNAPII_CELL:
             occupied[r.pos] = FREE
-        leg = args["cohesin_leg_by_pos"].pop(target, None)
+        args["cohesin_leg_by_pos"].pop(target, None)
         if leg is not None:
             leg.pos = behind
             leg.attrs["pushed"] = True

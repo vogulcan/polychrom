@@ -322,7 +322,8 @@ Each gene is a transcription unit running from its TSS to its TES. The direction
 is inferred from their order (`+1` if `tes > tss`, else `-1`). Every 1D tick:
 
 1. **Load.** With probability `load_prob`, a new polymerase is recruited onto a
-   free TSS in the **POISED** state.
+   free TSS in the **POISED** state. If `load_requires_enhancer` is true, this
+   recruitment step is also gated by current E-P contact.
 2. **POISED -> PAUSED.** With probability `initiation_prob` the polymerase
    initiates. If `pause_offset > 0` it also takes one step off the TSS into a
    promoter-proximal pause; otherwise it pauses on the TSS.
@@ -345,6 +346,7 @@ The topology plugin expands those sites by `chain_idx * chain_length`.
 | `tss` | Transcription start site; the load site and POISED position. |
 | `tes` | Transcription end site; RNAPII unloads here. Sign of `tes - tss` sets travel direction. |
 | `load_prob` | Per-tick probability of recruiting a new POISED RNAPII (only if the TSS is free). |
+| `load_requires_enhancer` | If true, RNAPII recruitment is blocked until the gene is in E-P contact. Defaults to false for backward compatibility. |
 | `requires_enhancer` | If true, pause release is blocked until the gene is in E-P contact. False = constitutive. |
 | `enhancer_pos` | Cognate enhancer site; defines the E-P pair tested for contact. Required when `requires_enhancer`. |
 | `initiation_prob` | Per-tick POISED -> PAUSED probability. |
@@ -379,18 +381,27 @@ release); `tol = 0` demands the loop reach the exact E-P sites.
 
 #### Cohesin <-> RNAPII collisions
 
-When an ELONGATING polymerase tries to step into a site held by a cohesin leg,
-the outcome is drawn once from a uniform `[0, 1)`:
+When an RNAPII tries to step into a site held by a cohesin leg, the outcome is
+**state- and orientation-aware** (Fursova & Larson 2024, Fig 3a):
 
-| Band (cumulative) | Outcome | Effect |
-|-------------------|---------|--------|
-| `[0, rnapii_stall_prob)` | **stall** | RNAPII blocked, does not advance. |
-| next `rnapii_push_prob` | **push** | RNAPII shoves the cohesin leg back one site (if the site behind is free) and advances. |
-| remainder | **pass** | RNAPII advances through, also displacing the leg. |
+1. **State gate.** Only an `ELONGATING` polymerase translocates productively, so
+   only it can push a cohesin. A `POISED` / `PAUSED` polymerase is a stationary
+   block and always **stalls** on contact. (A v1 single-state RNAPII carries no
+   `state` and is treated as always-elongating.)
+2. **Intrinsic stall floor.** With probability `rnapii_stall_prob` the elongating
+   polymerase stalls regardless of orientation (Pol II pausing/slowing on any
+   obstacle).
+3. **Orientation.** Otherwise the push probability depends on the cohesin leg's
+   extrusion direction relative to the RNAPII:
 
-So `rnapii_stall_prob` and `rnapii_push_prob` are direct probabilities, and
-whatever probability remains becomes *pass*. Choose values with
-`rnapii_stall_prob + rnapii_push_prob <= 1` if you want a non-zero pass band.
+| Leg orientation | Push parameter | Effect |
+|-----------------|----------------|--------|
+| co-directional (rear encounter, leg extrudes the same way Pol II travels) | `rnapii_push_prob` | RNAPII shoves the leg back one site (if the site behind is free) and advances. |
+| head-on (converging, leg extrudes toward Pol II) | `rnapii_headon_push_prob` (default `0.0`) | Usually stalls; pushing a converging motor is hard. |
+
+If the chosen push roll fails, the polymerase **stalls**. There is no longer a
+separate *pass* outcome (it previously duplicated *push*). A leg with no recorded
+`dir` (e.g. a bare `Leg` in a unit test) is treated as co-directional.
 
 The reverse interaction (a cohesin leg meeting an RNAPII body) is handled in
 `translocate_with_rnapii`: an RNAPII parked on its own TES is always bypassed.
@@ -413,6 +424,7 @@ The encounter parameters live in `topology_kwargs` alongside the genes:
 topology_kwargs:
   rnapii_stall_prob: 0.4
   rnapii_push_prob: 0.25
+  rnapii_headon_push_prob: 0.05
   rnapii_poised_block_prob: 1.0
   rnapii_paused_block_prob: 1.0
   rnapii_elongating_block_prob: 1.0
@@ -644,6 +656,41 @@ when `ep_pairs` already contain absolute monomer indices.
 > `enhancer_pos`/`tss` gate RNAPII pause release (loop-containment proxy), while
 > these `ep_pairs` add the 3D attraction. Keep the two lists consistent if you
 > want the same pairs to act in both stages.
+
+#### Pol II transcription-driven compaction (`polii_self_affinity`)
+
+Models Fursova & Larson 2024 (Fig 2a): Pol II-bound chromatin is biochemically
+self-affine, so actively transcribed gene bodies fold into a compact globule.
+
+```yaml
+force_builder:
+  kwargs:
+    selective_attraction_energy: 1.0   # E-P stickiness, kT
+    polii_self_affinity: 2.0           # Pol II self-attraction = 2 x 1.0 = 2 kT
+```
+
+How it works:
+
+* Enabled only when `polii_self_affinity > 0` **and** the 1D stage recorded
+  RNAPII (`max_rnapii > 0`) and genes. Otherwise the 3D physics is unchanged.
+* A dedicated "transcribed" monomer type is added to the `heteropolymer_SSW`
+  type system. Its self-attraction equals `polii_self_affinity *
+  selective_attraction_energy` (so it is expressed as a multiple of the E-P
+  stickiness; `2.0` here = 2 kT). The 3D stage forces `heteropolymer_SSW` on
+  whenever this feature is active, even without `ep_pairs`.
+* The transcribable set is every gene-body monomer (`TSS..TES`), minus any that
+  coincide with an E/P sticky site. Each frame, `polymer.StickyUpdater` switches
+  ON the gene bodies of genes that currently carry at least one **elongating**
+  RNAPII (state 2), and OFF the rest -- the same per-block `updateParametersInContext`
+  pattern used for SMC bonds. Pol II affinity is OFF during the initial
+  bare-polymer relaxation.
+* The affinity rides on the same chain-restricted nonbonded force, so replicate
+  chains never interact. With `num_chains > 1` the builder **requires**
+  `restrict_nonbonded_to_chains: true` and raises otherwise.
+
+Tuning: start low (1-3 kT). Too strong collapses the whole active region into a
+frozen globule; the paper notes full phase separation can itself inhibit
+transcription.
 
 ## Stage 3: `contacts`
 

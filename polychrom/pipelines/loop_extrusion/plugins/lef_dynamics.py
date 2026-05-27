@@ -40,6 +40,12 @@ class Cohesin:
     def __init__(self, left: Leg, right: Leg):
         self.left = left
         self.right = right
+        # Per-leg extrusion direction, consumed by the RNAPII head-on
+        # resolver: the left leg extrudes toward decreasing coordinates
+        # (-1), the right toward increasing (+1). Stamped on every cohesin
+        # (initial load and reloads) so orientation is always available.
+        left.attrs["dir"] = -1
+        right.attrs["dir"] = 1
 
     def any(self, attr: str) -> bool:
         return self.left.attrs.get(attr, False) or self.right.attrs.get(attr, False)

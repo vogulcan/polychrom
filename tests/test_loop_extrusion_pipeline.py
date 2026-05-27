@@ -31,12 +31,14 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     STATE_ELONGATING,
     STATE_PAUSED,
     STATE_POISED,
+    load_rnapii,
     translocate_rnapii,
 )
 from polychrom.pipelines.loop_extrusion.plugins import (
     forces as force_plugins,
     topology as topology_plugins,
 )
+from polychrom.pipelines.loop_extrusion.polymer import StickyUpdater, _gene_bodies
 from polychrom.pipelines.loop_extrusion.viewer import (
     build_elements_export,
     build_payload,
@@ -157,6 +159,35 @@ def test_poised_rnapii_block_probability_controls_cohesin_bypass():
     assert not cohesins[0].left.attrs["stalled"]
 
 
+def test_rnapii_loading_can_require_ep_contact():
+    occupied = np.zeros(10, dtype=np.int8)
+    gene = Gene(
+        gene_id=0,
+        tss=2,
+        tes=6,
+        direction=1,
+        load_prob=1.0,
+        enhancer_pos=5,
+        requires_enhancer=True,
+        load_requires_enhancer=True,
+    )
+    rnapiis = []
+    args = {
+        "genes": [gene],
+        "rnapii_by_pos": {},
+        "current_ep_contacts": set(),
+    }
+
+    load_rnapii(rnapiis, occupied, args)
+    assert rnapiis == []
+    assert occupied[2] == 0
+
+    args["current_ep_contacts"] = {0}
+    load_rnapii(rnapiis, occupied, args)
+    assert len(rnapiis) == 1
+    assert occupied[2] == RNAPII_CELL
+
+
 def test_paused_rnapii_block_probability_controls_cohesin_bypass():
     occupied, cohesins, args = _cohesin_hits_rnapii_args(
         STATE_PAUSED,
@@ -270,6 +301,72 @@ def test_rnapii_push_respects_chain_boundary():
 
     assert rnap.pos == 1
     assert leg.pos == 2
+
+
+def _push_args(extra=None):
+    # Single chain of length 8, RNAPII at 1 (dir +1), cohesin leg at 2,
+    # site behind (3) free so a push can land.
+    args = {
+        "N": 8,
+        "chain_length": 8,
+        "num_chains": 1,
+        "genes": [Gene(gene_id=0, tss=1, tes=7, direction=1, load_prob=0.0)],
+        "rnapii_by_pos": {},
+        "rnapii_stall_prob": 0.0,
+        "rnapii_push_prob": 1.0,
+    }
+    if extra:
+        args.update(extra)
+    return args
+
+
+def test_poised_rnapii_cannot_push_cohesin():
+    # Non-elongating Pol II is a stationary block: it never displaces cohesin
+    # even with push_prob = 1.0 (Fursova & Larson 2024, Fig 3a).
+    occupied = np.zeros(8, dtype=np.int8)
+    leg = Leg(2, {"stalled": False, "CTCF": False, "dir": 1})  # co-directional
+    rnap = RNAPII(pos=1, gene_id=0, direction=1)
+    rnap.attrs["state"] = STATE_POISED
+    occupied[1] = RNAPII_CELL
+    occupied[2] = COHESIN
+    args = _push_args({"cohesin_leg_by_pos": {2: leg}})
+
+    translocate_rnapii([rnap], [], occupied, args)
+
+    assert rnap.pos == 1          # blocked
+    assert leg.pos == 2
+
+
+def test_elongating_rnapii_pushes_codirectional_but_stalls_headon():
+    # Elongating Pol II pushes a co-directional (rear) leg; a head-on
+    # (converging) leg is governed by the separate, low headon push prob.
+    # Head-on case: headon_push_prob = 0 -> stall.
+    occ_h = np.zeros(8, dtype=np.int8)
+    leg_h = Leg(2, {"stalled": False, "CTCF": False, "dir": -1})  # head-on
+    rnap_h = RNAPII(pos=1, gene_id=0, direction=1)
+    rnap_h.attrs["state"] = STATE_ELONGATING
+    occ_h[1] = RNAPII_CELL
+    occ_h[2] = COHESIN
+    args_h = _push_args({
+        "cohesin_leg_by_pos": {2: leg_h},
+        "rnapii_headon_push_prob": 0.0,
+    })
+    translocate_rnapii([rnap_h], [], occ_h, args_h)
+    assert rnap_h.pos == 1        # head-on -> stall
+    assert leg_h.pos == 2
+
+    # Co-directional case: push_prob = 1.0 -> push (leg 2 -> 3, Pol II 1 -> 2).
+    occ_c = np.zeros(8, dtype=np.int8)
+    leg_c = Leg(2, {"stalled": False, "CTCF": False, "dir": 1})  # co-directional
+    rnap_c = RNAPII(pos=1, gene_id=0, direction=1)
+    rnap_c.attrs["state"] = STATE_ELONGATING
+    occ_c[1] = RNAPII_CELL
+    occ_c[2] = COHESIN
+    args_c = _push_args({"cohesin_leg_by_pos": {2: leg_c}})
+    translocate_rnapii([rnap_c], [], occ_c, args_c)
+    assert rnap_c.pos == 2        # co-directional -> push
+    assert leg_c.pos == 3
+    assert leg_c.attrs["pushed"]
 
 
 # --------------------------------------------------------------------------- #
@@ -709,3 +806,125 @@ def test_viewer_run_builds_h5_when_missing(tmp_path):
     assert h5.exists()                                   # built by the viewer stage
     assert out.exists()
     assert "Understanding Cohesin Bridging" in out.read_text()
+
+
+# --------------------------------------------------------------------------- #
+# Pol II transcription-driven compaction (3D self-affinity)
+# --------------------------------------------------------------------------- #
+class _RecordingNB:
+    """Fake heteropolymer nonbonded force recording per-particle type writes."""
+
+    name = "heteropolymer_SSW"
+
+    def __init__(self):
+        self.params: dict = {}
+        self.context_updates = 0
+
+    def setParticleParameters(self, idx, params):
+        self.params[int(idx)] = tuple(params)
+
+    def updateParametersInContext(self, _context):
+        self.context_updates += 1
+
+
+def test_gene_bodies_span_tss_to_tes_either_direction():
+    genes = np.array(
+        [(0, 250, 320, 1, 0.04), (1, 480, 400, -1, 0.02)],
+        dtype=[("gene_id", "i4"), ("tss", "i4"), ("tes", "i4"),
+               ("direction", "i4"), ("load_prob", "f4")],
+    )
+    bodies = _gene_bodies(genes)
+    assert bodies[0] == set(range(250, 321))
+    assert bodies[1] == set(range(400, 481))   # min/max regardless of direction
+
+
+def test_paper_force_builder_adds_polii_self_affinity(monkeypatch):
+    captured = {}
+    fake_nb = _RecordingNB()
+
+    class DummySim:
+        N = 800
+
+        def __init__(self):
+            self.force_dict = {}
+
+        def add_force(self, force):
+            self.force_dict["heteropolymer_SSW"] = fake_nb
+
+    def fake_polymer_chains(sim, **kwargs):
+        nb_kwargs = kwargs["nonbonded_force_kwargs"]
+        captured["monomer_types"] = nb_kwargs["monomerTypes"]
+        captured["interaction_matrix"] = nb_kwargs["interactionMatrix"]
+        return object()
+
+    monkeypatch.setattr(force_plugins.forcekits, "polymer_chains", fake_polymer_chains)
+    monkeypatch.setattr(force_plugins.forces, "spherical_confinement", lambda *a, **k: object())
+
+    force_plugins.paper_force_builder(
+        DummySim(),
+        num_chains=1,
+        chain_length=800,
+        ep_pairs=[[500, 250]],
+        transcribed_particles=list(range(250, 321)),  # gene0 body incl P=250
+        polii_self_affinity=2.0,
+    )
+
+    mt = captured["monomer_types"]
+    im = captured["interaction_matrix"]
+    polii_type = mt[300]                       # interior gene-body monomer
+    assert polii_type != 0
+    assert im[polii_type, polii_type] == 2.0   # self-attraction baked in
+    # P=250 coincides with an E/P sticky site -> excluded from Pol II candidates
+    assert mt[250] != polii_type
+    # candidates switched OFF (type 0) after the force is built; E/P site untouched
+    assert fake_nb.params[300] == (0.0, 0.0)
+    assert 250 not in fake_nb.params
+
+
+def test_polii_self_affinity_forbids_cross_chain_replicates():
+    class DummySim:
+        N = 800
+
+    with pytest.raises(ValueError):
+        force_plugins.paper_force_builder(
+            DummySim(),
+            num_chains=2,
+            chain_length=400,
+            transcribed_particles=[10, 11],
+            polii_self_affinity=1.0,
+            restrict_nonbonded_to_chains=False,    # would model across chains
+        )
+
+
+def test_sticky_updater_activates_gene_body_only_when_elongating():
+    gene_bodies = {0: {10, 11, 12, 13, 14}, 1: {30, 31, 32}}
+    candidates = sorted(gene_bodies[0] | gene_bodies[1])
+    rpos = np.array(
+        [
+            [[10, 0], [-1, -1]],   # frame 0: RNAPII on gene 0
+            [[31, 1], [-1, -1]],   # frame 1: RNAPII on gene 1
+        ],
+        dtype=np.int32,
+    )
+    rstate = np.array(
+        [
+            [STATE_ELONGATING, -1],   # gene 0 elongating
+            [STATE_PAUSED, -1],       # gene 1 paused -> not transcribing
+        ],
+        dtype=np.int8,
+    )
+    force = _RecordingNB()
+    su = StickyUpdater(
+        rpos, rstate, gene_bodies,
+        polii_type=3, candidates=candidates, extra_hard=set(),
+    )
+
+    active0 = su.setup(force, blocks=2, context=object())
+    assert active0 == {10, 11, 12, 13, 14}
+    assert all(force.params[m][0] == 3.0 for m in gene_bodies[0])
+    assert force.context_updates == 1
+
+    active1 = su.step(object())
+    assert active1 == set()                       # gene1 paused, gene0 gone
+    assert all(force.params[m][0] == 0.0 for m in gene_bodies[0])
+    assert force.context_updates == 2

@@ -165,6 +165,8 @@ def paper_force_builder(
     ep_pairs: list = (),
     replicate_ep_pairs_across_chains: bool = False,
     extra_hard_particles: list = (),
+    transcribed_particles: list = (),
+    polii_self_affinity: float = 0.0,
     bond_length: float = 1.0,
     bond_wiggle: float = 0.1,
     angle_k=None,
@@ -187,6 +189,16 @@ def paper_force_builder(
 
     ``sticky_particles`` is the flat list of E and P monomer indices
     (14 ints for 7 cognate E-P pairs).
+
+    Pol II / transcription-driven compaction (Fursova & Larson 2024, Fig 2a):
+    when ``polii_self_affinity > 0`` and ``transcribed_particles`` is non-empty,
+    a dedicated "transcribed" monomer type is added to the heteropolymer type
+    system with self-attraction equal to ``polii_self_affinity`` times the
+    global ``selective_attraction_energy``. ``transcribed_particles`` is the
+    flat list of transcribable (gene-body) monomers; the actively-transcribed
+    subset is toggled per frame by ``polymer.StickyUpdater`` (which reads the
+    ``sim.polii_meta`` stashed here). The affinity rides on the same
+    chain-restricted nonbonded force, so replicate chains never interact.
     """
     chains = [
         (chain_idx * chain_length, (chain_idx + 1) * chain_length, False)
@@ -200,7 +212,20 @@ def paper_force_builder(
         replicate_ep_pairs_across_chains=replicate_ep_pairs_across_chains,
     )
 
-    if expanded_ep_pairs:
+    polii_enabled = float(polii_self_affinity) > 0.0 and len(transcribed_particles) > 0
+    if polii_enabled and num_chains > 1 and not restrict_nonbonded_to_chains:
+        # Extra chains are replicates only; there must be no cross-chain
+        # physics. The chain-restricted wrapper installs per-chain interaction
+        # groups so the (single) Pol II type only self-attracts within a chain.
+        raise ValueError(
+            "polii_self_affinity with num_chains > 1 requires "
+            "restrict_nonbonded_to_chains=True (replicate chains must not "
+            "interact across chains)."
+        )
+
+    polii_meta = None
+
+    if expanded_ep_pairs or polii_enabled:
         sticky_sites = sorted({site for pair in expanded_ep_pairs for site in pair})
         site_to_type = {site: idx for idx, site in enumerate(sticky_sites, start=1)}
         monomer_types = np.zeros(sim.N, dtype=int)
@@ -209,12 +234,42 @@ def paper_force_builder(
                 raise ValueError(f"ep_pairs monomer index {site} is outside polymer length {sim.N}")
             monomer_types[site] = site_type
 
-        interaction_matrix = np.zeros((len(sticky_sites) + 1, len(sticky_sites) + 1), dtype=float)
+        n_types = len(sticky_sites) + 1  # type 0 (normal) + one per E/P site
+        polii_type = None
+        candidates: list = []
+        if polii_enabled:
+            polii_type = n_types          # next free type id
+            n_types += 1
+            # Transcribable monomers (gene bodies). Drop any coinciding with an
+            # E/P sticky site so we never clobber its pairwise E-P type.
+            candidates = sorted({
+                int(m) for m in transcribed_particles
+                if 0 <= int(m) < sim.N and int(m) not in site_to_type
+            })
+            # Seed candidates with the Pol II type so heteropolymer_SSW sizes
+            # Ntypes to include it and bakes the self-attraction term into the
+            # energy expression. They are switched OFF again right after the
+            # force is built, then driven per frame by StickyUpdater.
+            for m in candidates:
+                monomer_types[m] = polii_type
+
+        interaction_matrix = np.zeros((n_types, n_types), dtype=float)
         for enhancer, promoter in expanded_ep_pairs:
             enhancer_type = site_to_type[enhancer]
             promoter_type = site_to_type[promoter]
             interaction_matrix[enhancer_type, promoter_type] = 1.0
             interaction_matrix[promoter_type, enhancer_type] = 1.0
+        if polii_enabled:
+            # Pol II self-affinity, as a multiple of the global
+            # selectiveAttractionEnergy (E-P stickiness = 1.0 in the paper).
+            interaction_matrix[polii_type, polii_type] = float(polii_self_affinity)
+            polii_meta = {
+                "force_name": "heteropolymer_SSW",
+                "polii_type": polii_type,
+                "candidates": candidates,
+                "extra_hard": {int(m) for m in extra_hard_particles},
+            }
+
         nonbonded_force_func = forces.heteropolymer_SSW
         nonbonded_force_kwargs = {
             "interactionMatrix": interaction_matrix,
@@ -282,3 +337,14 @@ def paper_force_builder(
                 k=confinement_k,
             )
         )
+
+    if polii_meta is not None:
+        # Switch Pol II monomers off (type 0) now so the bare-polymer
+        # relaxation runs without Pol II affinity. StickyUpdater turns the
+        # per-frame transcribed subset back on once dynamics begin. The
+        # self-attraction term is already baked into the energy expression
+        # because the candidates were seeded with the Pol II type above.
+        nb = sim.force_dict[polii_meta["force_name"]]
+        for m in polii_meta["candidates"]:
+            nb.setParticleParameters(m, (0.0, float(m in polii_meta["extra_hard"])))
+        sim.polii_meta = polii_meta

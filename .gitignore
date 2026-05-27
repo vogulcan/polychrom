@@ -13,3 +13,6 @@ polychrom/*.so
 supplementary_material_clean.txt
 runs
 __pycache__
+viewer_outs
+references
+.claude

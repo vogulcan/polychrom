@@ -10,6 +10,7 @@ import numpy as np
 
 from .config import LEFConfig, resolve_plugin
 from .plugins.lef_dynamics import Cohesin
+from .plugins.rnapii import compute_ep_contacts
 
 
 def initial_state(cfg: LEFConfig, args: dict, load_fn) -> tuple[np.ndarray, List[Cohesin]]:
@@ -46,6 +47,13 @@ def _advance_one_step(
 ) -> None:
     """Advance one 1D dynamics tick for warmup or recording."""
     if rnapii_enabled:
+        if args.get("genes"):
+            tol = int(args.get("ep_contact_tolerance", 2))
+            args["current_ep_contacts"] = compute_ep_contacts(
+                cohesins,
+                args["genes"],
+                tolerance=tol,
+            )
         rnapii_load_fn(rnapiis, occupied, args)
         rnapii_translocate_fn(rnapiis, cohesins, occupied, args)
 

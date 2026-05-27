@@ -149,6 +149,7 @@ def gene_aware_topology(
     rnapii_stride: int = 1,
     rnapii_stall_prob: float = 0.4,
     rnapii_push_prob: float = 0.3,
+    rnapii_headon_push_prob: float = 0.0,
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
@@ -189,6 +190,7 @@ def gene_aware_topology(
     args["rnapii_stride"] = int(rnapii_stride)
     args["rnapii_stall_prob"] = float(rnapii_stall_prob)
     args["rnapii_push_prob"] = float(rnapii_push_prob)
+    args["rnapii_headon_push_prob"] = float(rnapii_headon_push_prob)
     fallback_block_prob = float(rnapii_block_prob)
     args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
     args["rnapii_paused_block_prob"] = (
@@ -217,6 +219,7 @@ def gene_aware_convergent_tad_topology(
     rnapii_stride: int = 1,
     rnapii_stall_prob: float = 0.4,
     rnapii_push_prob: float = 0.3,
+    rnapii_headon_push_prob: float = 0.0,
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
@@ -248,6 +251,7 @@ def gene_aware_convergent_tad_topology(
     args["rnapii_stride"] = int(rnapii_stride)
     args["rnapii_stall_prob"] = float(rnapii_stall_prob)
     args["rnapii_push_prob"] = float(rnapii_push_prob)
+    args["rnapii_headon_push_prob"] = float(rnapii_headon_push_prob)
     fallback_block_prob = float(rnapii_block_prob)
     args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
     args["rnapii_paused_block_prob"] = (

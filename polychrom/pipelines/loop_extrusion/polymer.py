@@ -20,6 +20,22 @@ import numpy as np
 from ...hdf5_format import HDF5Reporter
 from ...simulation import Simulation
 from .config import PolymerConfig, resolve_plugin
+from .plugins.rnapii import STATE_ELONGATING
+
+
+def _gene_bodies(genes_dataset) -> dict:
+    """Map gene_id -> set of (absolute) monomer indices spanning [TSS, TES].
+
+    ``genes_dataset`` is the structured ``genes`` HDF5 dataset written by the
+    1D stage (fields ``gene_id, tss, tes, ...``); coordinates are absolute,
+    already replicated across chains by the 1D topology.
+    """
+    bodies: dict = {}
+    for row in genes_dataset:
+        gid = int(row["gene_id"])
+        lo, hi = sorted((int(row["tss"]), int(row["tes"])))
+        bodies.setdefault(gid, set()).update(range(lo, hi + 1))
+    return bodies
 
 
 class BondUpdater:
@@ -85,6 +101,96 @@ class BondUpdater:
         return self.cur_bonds, past
 
 
+class StickyUpdater:
+    """Toggle Pol II self-affinity per frame to model transcription-driven
+    compaction (Fursova & Larson 2024, Fig 2a).
+
+    Mirrors :class:`BondUpdater`'s frame cursor. Each frame, the gene bodies of
+    genes that currently carry at least one ELONGATING RNAPII are switched to
+    the Pol II monomer type (self-attracting); all other transcribable monomers
+    are switched back to the normal type. Type changes are applied via
+    ``setParticleParameters`` on the heteropolymer nonbonded force, exactly the
+    pattern :class:`BondUpdater` uses for SMC bonds.
+    """
+
+    def __init__(
+        self,
+        rnapii_positions: np.ndarray,
+        rnapii_states: np.ndarray,
+        gene_bodies: dict,
+        *,
+        polii_type: int,
+        candidates: list,
+        extra_hard: set,
+    ):
+        self.rnapii_positions = rnapii_positions
+        self.rnapii_states = rnapii_states
+        self.polii_type = float(polii_type)
+        self.candidate_set = {int(m) for m in candidates}
+        self.extra_hard = {int(m) for m in extra_hard}
+        # Per-gene transcribable monomers (gene body restricted to candidates,
+        # i.e. excluding any E/P sticky sites dropped by the force builder).
+        self.gene_candidates = {
+            gid: (set(body) & self.candidate_set) for gid, body in gene_bodies.items()
+        }
+        self.cur_time = 0
+        self.force = None
+        self.cur_active: set = set()
+        self.pending: List[set] = []
+
+    def _params(self, on: bool, monomer: int):
+        type_id = self.polii_type if on else 0.0
+        return (type_id, float(monomer in self.extra_hard))
+
+    def _active_at(self, frame: int) -> set:
+        pos = self.rnapii_positions[frame]
+        states = self.rnapii_states[frame]
+        active_genes = set()
+        for k in range(pos.shape[0]):
+            gid = int(pos[k, 1])
+            if gid < 0:
+                continue
+            if int(states[k]) == STATE_ELONGATING:
+                active_genes.add(gid)
+        out: set = set()
+        for gid in active_genes:
+            out |= self.gene_candidates.get(gid, set())
+        return out
+
+    def setup(self, force, blocks: int, context=None) -> set:
+        if self.pending:
+            raise ValueError(f"Not all frames were used; {len(self.pending)} left")
+        self.force = force
+        # The force is freshly rebuilt each chunk with all candidates OFF, so
+        # the live state resets to empty.
+        self.cur_active = set()
+        frames = [self._active_at(self.cur_time + i) for i in range(blocks)]
+        first = frames[0]
+        self.pending = frames[1:]
+        for monomer in first:
+            force.setParticleParameters(monomer, self._params(True, monomer))
+        self.cur_active = set(first)
+        if context is not None:
+            force.updateParametersInContext(context)
+        self.cur_time += blocks
+        return self.cur_active
+
+    def step(self, context) -> set:
+        if not self.pending:
+            raise ValueError("No frames left; restart simulation and call setup() again")
+        nxt = self.pending.pop(0)
+        to_add = nxt - self.cur_active
+        to_remove = self.cur_active - nxt
+        for monomer in to_add:
+            self.force.setParticleParameters(monomer, self._params(True, monomer))
+        for monomer in to_remove:
+            self.force.setParticleParameters(monomer, self._params(False, monomer))
+        if to_add or to_remove:
+            self.force.updateParametersInContext(context)
+        self.cur_active = nxt
+        return self.cur_active
+
+
 def run(cfg: PolymerConfig) -> Path:
     """Run the 3D MD simulation. Returns the output trajectory folder."""
 
@@ -101,6 +207,24 @@ def run(cfg: PolymerConfig) -> Path:
         n_frames = lef_file["positions"].shape[0]
         chain_length = int(lef_file.attrs.get("chain_length", n_sites))
         num_chains = int(lef_file.attrs.get("num_chains", 1))
+
+        # Optional Pol II transcription-driven compaction (Fursova & Larson
+        # 2024, Fig 2a). Enabled when the force builder is given a positive
+        # polii_self_affinity AND the 1D stage recorded RNAPII + genes.
+        fb_kwargs = dict(plugins.force_builder.kwargs)
+        polii_feature = (
+            float(fb_kwargs.get("polii_self_affinity", 0.0)) > 0.0
+            and bool(lef_file.attrs.get("rnapii_enabled", False))
+            and "genes" in lef_file
+            and "rnapii_positions" in lef_file
+            and "rnapii_states" in lef_file
+        )
+        gene_bodies: dict = {}
+        if polii_feature:
+            gene_bodies = _gene_bodies(lef_file["genes"])
+            fb_kwargs["transcribed_particles"] = sorted(
+                {m for body in gene_bodies.values() for m in body}
+            )
 
         if n_frames % cfg.restart_every_blocks != 0:
             raise ValueError(
@@ -132,6 +256,7 @@ def run(cfg: PolymerConfig) -> Path:
         )
 
         milker = BondUpdater(lef_file["positions"])
+        sticky: "StickyUpdater | None" = None
 
         for iteration in range(sim_inits_total):
             sim_kwargs = dict(
@@ -155,8 +280,20 @@ def run(cfg: PolymerConfig) -> Path:
                 sim,
                 num_chains=num_chains,
                 chain_length=chain_length,
-                **plugins.force_builder.kwargs,
+                **fb_kwargs,
             )
+
+            if polii_feature and sticky is None:
+                meta = getattr(sim, "polii_meta", None)
+                if meta is not None and meta["candidates"]:
+                    sticky = StickyUpdater(
+                        lef_file["rnapii_positions"],
+                        lef_file["rnapii_states"],
+                        gene_bodies,
+                        polii_type=meta["polii_type"],
+                        candidates=meta["candidates"],
+                        extra_hard=meta["extra_hard"],
+                    )
 
             if iteration == 0 and cfg.initial_relaxation_steps > 0:
                 # Paper-style: relax bare polymer (no cohesin bonds) before
@@ -173,6 +310,13 @@ def run(cfg: PolymerConfig) -> Path:
                 bond_force=sim.force_dict["harmonic_bonds"],
                 blocks=cfg.restart_every_blocks,
             )
+            if sticky is not None:
+                meta = sim.polii_meta
+                sticky.setup(
+                    sim.force_dict[meta["force_name"]],
+                    blocks=cfg.restart_every_blocks,
+                    context=getattr(sim, "context", None),
+                )
             if sim.forces_applied:
                 # Initial bare-polymer relaxation creates an OpenMM context
                 # before dynamic SMC bonds exist. Reinitialize so the context
@@ -199,6 +343,8 @@ def run(cfg: PolymerConfig) -> Path:
                     sim.integrator.step(cfg.md_steps_per_block)
                 if i < cfg.restart_every_blocks - 1:
                     milker.step(sim.context)
+                    if sticky is not None:
+                        sticky.step(sim.context)
 
             data = sim.get_data()
             del sim

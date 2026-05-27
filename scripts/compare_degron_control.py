@@ -84,6 +84,16 @@ def parse_args() -> argparse.Namespace:
         default=1000,
         help="Genomic size per monomer/bin in bp for cis-decay plots.",
     )
+    parser.add_argument(
+        "--heatmap-cmap",
+        default="Reds",
+        help="Sequential colormap used for observed count heatmaps.",
+    )
+    parser.add_argument(
+        "--delta-cmap",
+        default="coolwarm",
+        help="Diverging colormap used for O/E log2 and fold-change/delta heatmaps.",
+    )
     return parser.parse_args()
 
 
@@ -186,13 +196,16 @@ def plot_noice_vs_ice(
     boundaries: Iterable[int],
     output_path: Path,
     mask_diagonal_radius: int,
+    delta_cmap_name: str,
 ) -> dict[str, dict[str, float]]:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    masked_cmap = plt.get_cmap("coolwarm").copy()
+    from matplotlib.colors import TwoSlopeNorm
+
+    masked_cmap = plt.get_cmap(delta_cmap_name).copy()
     masked_cmap.set_bad("#e5e7eb")
     log_pairs = [(name, log2_positive(noice), log2_positive(ice)) for name, noice, ice in conditions]
     combined = np.concatenate([
@@ -236,8 +249,7 @@ def plot_noice_vs_ice(
             im = ax.imshow(
                 data,
                 cmap=masked_cmap,
-                vmin=-panel_vmax,
-                vmax=panel_vmax,
+                norm=TwoSlopeNorm(vmin=-panel_vmax, vcenter=0.0, vmax=panel_vmax),
                 interpolation="nearest",
                 origin="upper",
             )
@@ -265,16 +277,20 @@ def plot_observed_only(
     boundaries: Iterable[int],
     output_path: Path,
     mask_diagonal_radius: int,
+    heatmap_cmap_name: str,
+    delta_cmap_name: str,
 ) -> tuple[np.ndarray, dict[str, float]]:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    magmap = plt.get_cmap("magma").copy()
-    magmap.set_bad("#e5e7eb")
-    diverging = plt.get_cmap("coolwarm").copy()
-    diverging.set_bad("#e5e7eb")
+    from matplotlib.colors import TwoSlopeNorm
+
+    heatmap_cmap = plt.get_cmap(heatmap_cmap_name).copy()
+    heatmap_cmap.set_bad("#e5e7eb")
+    delta_cmap = plt.get_cmap(delta_cmap_name).copy()
+    delta_cmap.set_bad("#e5e7eb")
     control = np.asarray(control_raw, dtype=float)
     degron = np.asarray(degron_raw, dtype=float)
     valid = np.isfinite(control) & np.isfinite(degron) & (control > 0) & (degron > 0)
@@ -290,23 +306,24 @@ def plot_observed_only(
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     panels = [
-        ("control observed log2(count + 1)", control_log, magmap, 0.0, count_vmax, "log2 count"),
-        ("degron observed log2(count + 1)", degron_log, magmap, 0.0, count_vmax, "log2 count"),
-        ("observed degron/control log2FC", raw_log2fc, diverging, -fc_vmax, fc_vmax, "log2FC"),
+        ("control observed log2(count + 1)", control_log, heatmap_cmap, 0.0, count_vmax, None, "log2 count"),
+        ("degron observed log2(count + 1)", degron_log, heatmap_cmap, 0.0, count_vmax, None, "log2 count"),
+        ("observed degron/control log2FC", raw_log2fc, delta_cmap, -fc_vmax, fc_vmax, 0.0, "log2FC"),
     ]
-    for ax, (title, data, cmap, vmin, vmax, label) in zip(axes, panels):
-        im = ax.imshow(
-            data,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            interpolation="nearest",
-            origin="upper",
-        )
+    for ax, (title, data, cmap, vmin, vmax, center, label) in zip(axes, panels):
+        imshow_kwargs = {
+            "cmap": cmap,
+            "interpolation": "nearest",
+            "origin": "upper",
+        }
+        if center is None:
+            imshow_kwargs.update({"vmin": vmin, "vmax": vmax})
+        else:
+            imshow_kwargs["norm"] = TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
+        im = ax.imshow(data, **imshow_kwargs)
         for boundary in boundaries:
-            line_color = "white" if cmap is magmap else "black"
-            ax.axhline(boundary - 0.5, color=line_color, lw=0.5, ls="--", alpha=0.35)
-            ax.axvline(boundary - 0.5, color=line_color, lw=0.5, ls="--", alpha=0.35)
+            ax.axhline(boundary - 0.5, color="black", lw=0.5, ls="--", alpha=0.35)
+            ax.axvline(boundary - 0.5, color="black", lw=0.5, ls="--", alpha=0.35)
         draw_masked_diagonal_band(ax, data.shape[0], mask_diagonal_radius)
         ax.set_title(title)
         ax.set_xlabel("monomer index")
@@ -439,13 +456,16 @@ def plot_fold_change(
     boundaries: Iterable[int],
     output_path: Path,
     mask_diagonal_radius: int,
+    delta_cmap_name: str,
 ) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    masked_cmap = plt.get_cmap("coolwarm").copy()
+    from matplotlib.colors import TwoSlopeNorm
+
+    masked_cmap = plt.get_cmap(delta_cmap_name).copy()
     masked_cmap.set_bad("#e5e7eb")
     finite = log2fc[np.isfinite(log2fc)]
     vmax = 1.0
@@ -457,8 +477,7 @@ def plot_fold_change(
     im = ax.imshow(
         log2fc,
         cmap=masked_cmap,
-        vmin=-vmax,
-        vmax=vmax,
+        norm=TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax),
         interpolation="nearest",
         origin="upper",
     )
@@ -992,6 +1011,7 @@ def main() -> None:
         boundaries,
         output_dir / "noice_vs_ice_oe.png",
         mask_radius,
+        args.delta_cmap,
     )
     observed_log2fc, observed_stats = plot_observed_only(
         control_raw_masked,
@@ -999,6 +1019,8 @@ def main() -> None:
         boundaries,
         output_dir / "observed_only.png",
         mask_radius,
+        args.heatmap_cmap,
+        args.delta_cmap,
     )
     np.save(output_dir / "observed_degron_over_control_log2fc.npy", observed_log2fc)
     cis_decay_stats = plot_cis_decay_fold_change(
@@ -1012,7 +1034,13 @@ def main() -> None:
     fc, log2fc = fold_change_oe(control_oe_masked, degron_oe_masked)
     np.save(output_dir / "degron_over_control_oe_fold_change.npy", fc)
     np.save(output_dir / "degron_over_control_oe_log2fc.npy", log2fc)
-    plot_fold_change(log2fc, boundaries, output_dir / "degron_over_control_oe_log2fc.png", mask_radius)
+    plot_fold_change(
+        log2fc,
+        boundaries,
+        output_dir / "degron_over_control_oe_log2fc.png",
+        mask_radius,
+        args.delta_cmap,
+    )
 
     tad_rows: list[dict[str, object]] = []
     if tads:

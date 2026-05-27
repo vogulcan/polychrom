@@ -1,0 +1,161 @@
+lef:
+  chain_length: 800
+  num_chains: 1
+  # 800 / 120 = 6 cohesins (~1 per 120 kb). Denser than the paper's d=240 kb so
+  # a cohesin loop brackets the 250 kb E-P pair often enough for meaningful
+  # E-P contact statistics in this small window. Must match postUV.yaml.
+  separation: 120
+  lifetime: 150
+  lifetime_stalled: 150
+  warmup_steps: 10000
+  trajectory_length: 100000
+  chunk_size: 50
+  seed: 1001
+  max_rnapii: 128
+  output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
+
+  topology_kwargs:
+    tad_positions: [200, 600]
+    boundary_strength: 0.5
+    release_prob: 0.0
+    include_chromosome_ends: true
+    # RNAPII -> cohesin collision (Pol II is the mover). Fursova & Larson 2024
+    # Fig 3a: only elongating Pol II pushes cohesin, and it pushes a
+    # co-directional (rear) leg far more than a head-on (converging) one.
+    rnapii_stall_prob: 0.20        # intrinsic stall floor on any obstacle
+    rnapii_push_prob: 0.30         # push prob, co-directional leg (rear encounter)
+    rnapii_headon_push_prob: 0.05  # push prob, head-on leg (converging) -- mostly stalls
+    # cohesin -> RNAPII collision (cohesin is the mover): per-tick block prob by
+    # Pol II state. block_prob is re-rolled each tick, so mean dwell before a
+    # cohesin bypasses ~ 1/(1-block) ticks (~8 s/tick). These values make Pol II
+    # a weak-but-real, semi-permeable barrier (dwell of seconds-to-minutes, all
+    # < 1.0 so cohesin still bypasses within its ~20 min residence) -- enough to
+    # accumulate cohesin at TSS/TES (stripes, fountains; Fursova & Larson 2024
+    # Fig 3a/4), unlike the near-transparent 0.25/0.50 used before. Paused/
+    # terminating Pol II is the strongest stationary block; elongating weaker
+    # (it also pushes); poised weakest. CTCF stays the only stable barrier.
+    rnapii_poised_block_prob: 0.5      # dwell ~16 s
+    rnapii_paused_block_prob: 0.95     # dwell ~2.7 min (strongest)
+    rnapii_elongating_block_prob: 0.8  # dwell ~40 s
+    ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
+    genes:
+      - {tss: 250,  tes: 320,  load_prob: 0.04, requires_enhancer: true,
+         load_requires_enhancer: true,
+         enhancer_pos: 500,
+         initiation_prob: 0.5, pause_release_prob: 0.3,
+         elongation_step_prob: 0.5, pause_offset: 1}
+      # Constitutive (enhancer-independent) gene in the third TAD [600,800] --
+      # outside gene0's E-P loop (250<->500) and clear of the enhancer at 500,
+      # so it is an independent domain rather than nested in / adjacent to the
+      # regulatory loop.
+      - {tss: 650,  tes: 730,  load_prob: 0.02, requires_enhancer: false,
+         initiation_prob: 0.5, pause_release_prob: 0.5,
+         elongation_step_prob: 0.5, pause_offset: 1}
+
+  plugins:
+    topology:
+      target: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_one
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load:        polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+
+viewer:
+  lef_positions_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
+  output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/bridging_viewer.html
+  max_frames: 10000
+  bridge_cost: 1.0
+  insulation_score_window: 50
+  site_start: 0
+  site_end: 800
+
+polymer:
+  lef_positions_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/LEFPositions.h5
+  output_folder: /home/carlos/Clone/polychrom/viewer_outs/preUV
+
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.01
+  collision_rate: 1.0
+  precision: mixed
+  seed: 2001
+
+  density: 0.2
+  pbc: false
+
+  md_steps_per_block: 1270
+  save_every_blocks: 10
+  restart_every_blocks: 200
+
+  initial_relaxation_steps: 500000
+  pre_recording_steps: 100000
+
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 100
+  overwrite: true
+
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: null
+        repulsion_energy: 50.0
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 2.0
+        restrict_nonbonded_to_chains: true
+        replicate_ep_pairs_across_chains: true
+        ep_pairs:
+          - [500, 250]
+        selective_attraction_energy: 1.0
+        # Pol II transcription-driven compaction (Fursova & Larson 2024, Fig 2a):
+        # gene bodies of genes carrying an elongating RNAPII self-attract.
+        # Strength = multiple of selective_attraction_energy (here 2 x 1.0 = 2 kT).
+        # Rides on the chain-restricted nonbonded force -> no cross-chain physics.
+        polii_self_affinity: 2.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.2
+        confinement_per_chain: true
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  trajectory_folder: /home/carlos/Clone/polychrom/viewer_outs/preUV
+  raw_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map.npy
+  oe_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map_oe.npy
+  viz_output_path: /home/carlos/Clone/polychrom/viewer_outs/preUV/contact_map_oe.png
+  replicate_map_starts_across_chains: true
+  map_starts: [0]
+  map_size: 800
+  cutoff: 2.0
+  num_processes: 36
+  verbose: true
+
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 2000
+        tol: 1.0e-6
+        ignore_diagonals: 2
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150
+        
