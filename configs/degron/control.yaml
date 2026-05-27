@@ -111,6 +111,7 @@ polymer:
         selective_attraction_energy: 1.0
         selective_repulsion_energy: 0.0
         confinement_density: 0.2
+        confinement_per_chain: true
         confinement_k: 5.0
     initial_conformation:
       target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation

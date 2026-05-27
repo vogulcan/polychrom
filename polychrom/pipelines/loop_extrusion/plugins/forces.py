@@ -134,6 +134,28 @@ def _chain_restricted_nonbonded(force_func, *, num_chains: int, chain_length: in
     return build
 
 
+def _spherical_confinement_for_replicates(
+    sim,
+    *,
+    num_chains: int,
+    chain_length: int,
+    density: float,
+    k: float,
+):
+    """Add one same-density spherical confinement per replicate chain."""
+    radius = (3 * chain_length / (4 * np.pi * density)) ** (1.0 / 3.0)
+    return [
+        forces.spherical_confinement(
+            sim,
+            r=radius,
+            k=k,
+            particles=range(chain_idx * chain_length, (chain_idx + 1) * chain_length),
+            name=f"spherical_confinement_chain_{chain_idx}",
+        )
+        for chain_idx in range(num_chains)
+    ]
+
+
 def paper_force_builder(
     sim,
     *,
@@ -155,6 +177,7 @@ def paper_force_builder(
     confinement_density: float = 0.2,
     confinement_k: float = 5.0,
     restrict_nonbonded_to_chains: bool = False,
+    confinement_per_chain: bool = False,
 ) -> None:
     """Force kit from Nat. Rev. Mol. Cell Biol. supplementary box 1.
 
@@ -241,10 +264,21 @@ def paper_force_builder(
         )
     )
 
-    sim.add_force(
-        forces.spherical_confinement(
-            sim,
-            density=confinement_density,
-            k=confinement_k,
+    if confinement_per_chain:
+        sim.add_force(
+            _spherical_confinement_for_replicates(
+                sim,
+                num_chains=num_chains,
+                chain_length=chain_length,
+                density=confinement_density,
+                k=confinement_k,
+            )
         )
-    )
+    else:
+        sim.add_force(
+            forces.spherical_confinement(
+                sim,
+                density=confinement_density,
+                k=confinement_k,
+            )
+        )

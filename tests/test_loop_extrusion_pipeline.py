@@ -570,6 +570,52 @@ def test_paper_force_builder_can_restrict_nonbonded_to_chains(monkeypatch):
     ]
 
 
+def test_paper_force_builder_can_constrain_each_replicate_chain(monkeypatch):
+    captured = []
+
+    class DummyForce:
+        def __init__(self, name):
+            self.name = name
+
+    class DummySim:
+        N = 12
+
+        def add_force(self, force):
+            pass
+
+    def fake_polymer_chains(sim, **kwargs):
+        return DummyForce("polymer")
+
+    def fake_spherical_confinement(sim, **kwargs):
+        captured.append(kwargs)
+        return DummyForce(kwargs["name"])
+
+    monkeypatch.setattr(force_plugins.forcekits, "polymer_chains", fake_polymer_chains)
+    monkeypatch.setattr(force_plugins.forces, "spherical_confinement", fake_spherical_confinement)
+
+    force_plugins.paper_force_builder(
+        DummySim(),
+        num_chains=3,
+        chain_length=4,
+        ep_pairs=[],
+        confinement_density=0.2,
+        confinement_per_chain=True,
+    )
+
+    expected_radius = (3 * 4 / (4 * np.pi * 0.2)) ** (1.0 / 3.0)
+    assert [call["name"] for call in captured] == [
+        "spherical_confinement_chain_0",
+        "spherical_confinement_chain_1",
+        "spherical_confinement_chain_2",
+    ]
+    assert [list(call["particles"]) for call in captured] == [
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [8, 9, 10, 11],
+    ]
+    assert all(np.isclose(call["r"], expected_radius) for call in captured)
+
+
 def test_build_payload_promoter_direction_follows_gene(tmp_path):
     lef_cfg = LEFConfig(
         chain_length=400, num_chains=1, separation=400,
