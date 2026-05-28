@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from ..config import LEFConfig
 from .rnapii import build_genes
+from .lesions import seed_periodic_lesions
 
 
 def _empty_ctcf() -> Dict[int, Dict[int, float]]:
@@ -190,6 +191,7 @@ def gene_aware_topology(
     lesion_lifetime: int = 100,
     lesion_block_prob: float = 0.95,
     lesion_max: int = 64,
+    lesion_spacing: int = 0,
 ) -> Dict[str, Any]:
     """CTCF TAD layout + per-gene transcription units.
 
@@ -257,6 +259,11 @@ def gene_aware_topology(
     args["lesion_lifetime"] = int(lesion_lifetime)
     args["lesion_block_prob"] = float(lesion_block_prob)
     args["lesion_max"] = int(lesion_max)
+    # Optional: deterministic CPD seeding -- a UV pulse depositing lesions at
+    # every ``lesion_spacing`` monomer in each gene body, persisting for
+    # lesion_lifetime ticks (set very large for permanent damage).
+    if lesion_spacing > 0:
+        seed_periodic_lesions(args, int(lesion_spacing), int(lesion_lifetime))
     return args
 
 
@@ -288,6 +295,7 @@ def gene_aware_convergent_tad_topology(
     lesion_lifetime: int = 100,
     lesion_block_prob: float = 0.95,
     lesion_max: int = 64,
+    lesion_spacing: int = 0,
 ) -> Dict[str, Any]:
     """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
     args = convergent_tad_topology(
@@ -346,6 +354,11 @@ def gene_aware_convergent_tad_topology(
     args["lesion_lifetime"] = int(lesion_lifetime)
     args["lesion_block_prob"] = float(lesion_block_prob)
     args["lesion_max"] = int(lesion_max)
+    # Optional: deterministic CPD seeding -- a UV pulse depositing lesions at
+    # every ``lesion_spacing`` monomer in each gene body, persisting for
+    # lesion_lifetime ticks (set very large for permanent damage).
+    if lesion_spacing > 0:
+        seed_periodic_lesions(args, int(lesion_spacing), int(lesion_lifetime))
     return args
 
 

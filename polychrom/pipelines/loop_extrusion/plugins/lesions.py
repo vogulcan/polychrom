@@ -31,6 +31,26 @@ def is_lesion(site: int, args: Dict) -> bool:
     return int(site) in args.get("lesions", {})
 
 
+def seed_periodic_lesions(args: Dict, spacing: int, lifetime: int) -> int:
+    """Pre-place lesions at every ``spacing``-th monomer in each gene body.
+
+    Models a UV pulse that deposits CPDs at regular intervals along transcribed
+    DNA. Lesions get ``lifetime`` ticks until repair (set very high for
+    persistent damage over the trajectory). Returns the number of lesions seeded.
+    """
+    lesions: Dict[int, int] = args.setdefault("lesions", {})
+    if spacing <= 0:
+        return 0
+    seeded = 0
+    for gene in args.get("genes", []):
+        lo, hi = (gene.tss, gene.tes) if gene.tss <= gene.tes else (gene.tes, gene.tss)
+        for site in range(lo, hi + 1, spacing):
+            if site not in lesions:
+                lesions[site] = int(lifetime)
+                seeded += 1
+    return seeded
+
+
 def update_lesions(args: Dict) -> None:
     """Advance lesion state one tick: repair existing, then spawn new ones.
 
