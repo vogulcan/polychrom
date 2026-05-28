@@ -16,6 +16,7 @@ from .config import (
     ContactsConfig,
     ViewerConfig,
     PluginSpec,
+    apply_output_path,
     load_config,
     resolve_plugin,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "ContactsConfig",
     "ViewerConfig",
     "PluginSpec",
+    "apply_output_path",
     "load_config",
     "resolve_plugin",
 ]

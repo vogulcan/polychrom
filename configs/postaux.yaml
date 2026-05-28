@@ -13,7 +13,6 @@ lef:
   chunk_size: 50
   seed: 1001
   max_rnapii: 0
-  output_path: /home/carlos/Clone/polychrom/runs/postaux/LEFPositions.h5
 
   topology_kwargs:
     tad_positions: [160, 320, 480, 640]
@@ -61,8 +60,6 @@ lef:
     lesion:             polychrom.pipelines.loop_extrusion.plugins.lesions:update_lesions
 
 viewer:
-  lef_positions_path: /home/carlos/Clone/polychrom/runs/postaux/LEFPositions.h5
-  output_path: /home/carlos/Clone/polychrom/runs/postaux/bridging_viewer.html
   max_frames: 10000
   bridge_cost: 1.0
   insulation_score_window: 50
@@ -70,8 +67,6 @@ viewer:
   site_end: 800
 
 polymer:
-  lef_positions_path: /home/carlos/Clone/polychrom/runs/postaux/LEFPositions.h5
-  output_folder: /home/carlos/Clone/polychrom/runs/postaux
   platform: cuda
   gpu: "0"
   integrator: variableLangevin
@@ -114,10 +109,6 @@ polymer:
       target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
 
 contacts:
-  trajectory_folder: /home/carlos/Clone/polychrom/runs/postaux
-  raw_output_path: /home/carlos/Clone/polychrom/runs/postaux/contact_map.npy
-  oe_output_path: /home/carlos/Clone/polychrom/runs/postaux/contact_map_oe.npy
-  viz_output_path: /home/carlos/Clone/polychrom/runs/postaux/contact_map_oe.png
   replicate_map_starts_across_chains: true
   map_starts: [0]
   map_size: 800

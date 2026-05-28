@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 import pytest
 
+from polychrom.pipelines.loop_extrusion import cli as cli_stage
 from polychrom.pipelines.loop_extrusion import lef as lef_stage
 from polychrom.pipelines.loop_extrusion import contacts as contacts_stage
 from polychrom.pipelines.loop_extrusion import viewer as viewer_stage
@@ -87,6 +88,71 @@ polymer:
     assert cfg.lef.warmup_steps == 123
     assert cfg.lef.seed == 17
     assert cfg.polymer.seed == 19
+
+
+def test_loop_extrusion_config_derives_paths_from_runtime_output(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        """
+lef:
+  output_path: /stale/LEFPositions.h5
+viewer:
+  lef_positions_path: /stale/LEFPositions.h5
+  output_path: /stale/bridging_viewer.html
+  heatmap_output_path: /stale/heatmap.npy
+  elements_output_path: /stale/elements.json
+polymer:
+  lef_positions_path: /stale/LEFPositions.h5
+  output_folder: /stale
+contacts:
+  trajectory_folder: /stale
+  raw_output_path: /stale/contact_map.npy
+  oe_output_path: /stale/contact_map_oe.npy
+  viz_output_path: /stale/contact_map_oe.png
+"""
+    )
+    out_dir = tmp_path / "run"
+
+    cfg = load_config(cfg_path, output_path=out_dir)
+
+    assert cfg.lef.output_path == str(out_dir / "LEFPositions.h5")
+    assert cfg.viewer.lef_positions_path == str(out_dir / "LEFPositions.h5")
+    assert cfg.viewer.output_path == str(out_dir / "bridging_viewer.html")
+    assert cfg.viewer.heatmap_output_path == str(
+        out_dir / "bridging_viewer_visited_heatmap.npy"
+    )
+    assert cfg.viewer.elements_output_path == str(
+        out_dir / "bridging_viewer_elements.json"
+    )
+    assert cfg.polymer.lef_positions_path == str(out_dir / "LEFPositions.h5")
+    assert cfg.polymer.output_folder == str(out_dir)
+    assert cfg.contacts.trajectory_folder == str(out_dir)
+    assert cfg.contacts.raw_output_path == str(out_dir / "contact_map.npy")
+    assert cfg.contacts.oe_output_path == str(out_dir / "contact_map_oe.npy")
+    assert cfg.contacts.viz_output_path == str(out_dir / "contact_map_oe.png")
+
+
+def test_loop_extrusion_cli_accepts_runtime_output_path(tmp_path, monkeypatch, capsys):
+    cfg_path = tmp_path / "config.yaml"
+    config_text = "lef:\n  chain_length: 10\n"
+    cfg_path.write_text(config_text)
+    out_dir = tmp_path / "run"
+    calls = {}
+
+    def fake_lef_run(lef_cfg):
+        calls["lef_output_path"] = lef_cfg.output_path
+        return lef_cfg.output_path
+
+    monkeypatch.setattr(cli_stage.lef_stage, "run", fake_lef_run)
+
+    assert cli_stage.main(["lef", str(cfg_path), str(out_dir)]) == 0
+
+    assert calls["lef_output_path"] == str(out_dir / "LEFPositions.h5")
+    assert (out_dir / "config.yaml").read_text() == config_text
+    stdout = capsys.readouterr().out
+    assert f"output directory {out_dir}" in stdout
+    assert f"saved {out_dir / 'config.yaml'}" in stdout
+    assert str(out_dir / "LEFPositions.h5") in stdout
 
 
 def test_lef_stage_writes_h5_trajectory(tmp_path):

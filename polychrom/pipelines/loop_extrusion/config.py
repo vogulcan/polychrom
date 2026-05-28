@@ -11,7 +11,25 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Union,
+    get_type_hints,
+)
+
+try:
+    from typing import get_args, get_origin
+except ImportError:  # Python 3.7 typing module
+    def get_origin(tp):
+        return getattr(tp, "__origin__", None)
+
+    def get_args(tp):
+        return getattr(tp, "__args__", ())
 
 import yaml
 
@@ -280,6 +298,37 @@ class PipelineConfig:
     viewer: ViewerConfig = field(default_factory=ViewerConfig)
 
 
+def apply_output_path(
+    cfg: PipelineConfig,
+    output_path: Union[str, Path],
+) -> PipelineConfig:
+    """Derive all pipeline input/output paths from one output directory."""
+
+    output_dir = Path(output_path)
+    lef_positions = output_dir / "LEFPositions.h5"
+
+    cfg.lef.output_path = str(lef_positions)
+
+    cfg.viewer.lef_positions_path = str(lef_positions)
+    cfg.viewer.output_path = str(output_dir / "bridging_viewer.html")
+    cfg.viewer.heatmap_output_path = str(
+        output_dir / "bridging_viewer_visited_heatmap.npy"
+    )
+    cfg.viewer.elements_output_path = str(
+        output_dir / "bridging_viewer_elements.json"
+    )
+
+    cfg.polymer.lef_positions_path = str(lef_positions)
+    cfg.polymer.output_folder = str(output_dir)
+
+    cfg.contacts.trajectory_folder = str(output_dir)
+    cfg.contacts.raw_output_path = str(output_dir / "contact_map.npy")
+    cfg.contacts.oe_output_path = str(output_dir / "contact_map_oe.npy")
+    cfg.contacts.viz_output_path = str(output_dir / "contact_map_oe.png")
+
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # YAML <-> dataclass plumbing
 # ---------------------------------------------------------------------------
@@ -309,21 +358,18 @@ def _from_dict(cls, data: Any) -> Any:
 
 def _resolve_type(cls, key: str):
     """Return the runtime type of a dataclass field."""
-    import typing
 
-    hints = typing.get_type_hints(cls)
+    hints = get_type_hints(cls)
     return hints.get(key)
 
 
 def _coerce(field_type, value):
-    import typing
-
-    origin = typing.get_origin(field_type)
-    args = typing.get_args(field_type)
+    origin = get_origin(field_type)
+    args = get_args(field_type)
 
     if field_type is PluginSpec or (origin is None and isinstance(field_type, type) and issubclass(field_type, PluginSpec)):
         return PluginSpec.from_obj(value)
-    if origin is typing.Union:  # Optional[X]
+    if origin is Union:  # Optional[X]
         non_none = [a for a in args if a is not type(None)]
         if value is None:
             return None
@@ -339,8 +385,18 @@ def _coerce(field_type, value):
     return value
 
 
-def load_config(path: str | Path) -> PipelineConfig:
-    """Load a YAML config file into a :class:`PipelineConfig`."""
+def load_config(
+    path: Union[str, Path],
+    output_path: Optional[Union[str, Path]] = None,
+) -> PipelineConfig:
+    """Load a YAML config file into a :class:`PipelineConfig`.
+
+    When ``output_path`` is provided, it is treated as the run output directory
+    and all stage path fields are derived from it.
+    """
     with open(path, "r") as fh:
         raw = yaml.safe_load(fh) or {}
-    return _from_dict(PipelineConfig, raw)
+    cfg = _from_dict(PipelineConfig, raw)
+    if output_path is not None:
+        apply_output_path(cfg, output_path)
+    return cfg
