@@ -486,7 +486,7 @@ Built-in collision behavior:
 
 ## `viewer` Section
 
-The viewer stage builds a self-contained HTML page for the 1D trajectory. It
+The viewer stage builds a self-contained HTML page for the 1D trajectory with a similar layout to Földes et. al 2026, as well as insulation scores computed in 1D. It
 also writes a cumulative bridge-contact heatmap and a JSON annotation export.
 
 ### Fields
