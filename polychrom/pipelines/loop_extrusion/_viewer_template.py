@@ -19,7 +19,7 @@ Embedded data contract (compact for size)::
 
       eps:       [{e, p, label, genomic}, ...],
       frames:    [{c: [[id, left, right], ...], r: [[pos, gene_id, state], ...],
-                   s: [sEff|null, ...]}, ...]
+                   s: [sEff|null, ...], l: [site, ...]}, ...]
     }
 """
 
@@ -71,6 +71,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .swatch.rnapii-poised { background:#64748b; border-radius:999px; }
   .swatch.rnapii-paused { background:#f59e0b; border-radius:999px; }
   .swatch.rnapii-elongating { background:#be185d; border-radius:999px; }
+  .swatch.lesion { background:#dc2626; transform:rotate(45deg); }
   .epval { font-size:13px; color:var(--fg); font-variant-numeric:tabular-nums; }
   .empty { color:var(--muted); font-size:13px; font-style:italic; padding:6px 0; }
 </style>
@@ -104,6 +105,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <span class="legend-item"><span class="swatch rnapii-poised"></span> RNAPII poised</span>
     <span class="legend-item"><span class="swatch rnapii-paused"></span> RNAPII paused</span>
     <span class="legend-item"><span class="swatch rnapii-elongating"></span> RNAPII elongating</span>
+    <span class="legend-item"><span class="swatch lesion"></span> DNA lesion</span>
   </div>
 
   <div class="bottom-panels">
@@ -274,6 +276,28 @@ function drawRNAPII(svg, xs, base) {
     svg.appendChild(label);
   }
 }
+function drawLesions(svg, xs, base) {
+  // DNA-damage sites on the backbone (current frame): red star burst.
+  const r = 4.5;
+  for (const site of (DATA.frames[t].l || [])) {
+    const x = xs(site);
+    const g = document.createElementNS(SVGNS, "g");
+    for (const ang of [0, 45, 90, 135]) {
+      const rad = ang * Math.PI / 180;
+      const dx = r * Math.cos(rad), dy = r * Math.sin(rad);
+      const ray = document.createElementNS(SVGNS, "line");
+      ray.setAttribute("x1", x - dx); ray.setAttribute("y1", base - dy);
+      ray.setAttribute("x2", x + dx); ray.setAttribute("y2", base + dy);
+      ray.setAttribute("stroke", "#dc2626"); ray.setAttribute("stroke-width", "1.6");
+      ray.setAttribute("stroke-linecap", "round");
+      g.appendChild(ray);
+    }
+    const title = document.createElementNS(SVGNS, "title");
+    title.textContent = `DNA lesion @ site ${site + (DATA.siteOffset || 0)}`;
+    g.appendChild(title);
+    svg.appendChild(g);
+  }
+}
 function drawLattice() {
   latSvg.innerHTML = "";
   const w = latSvg.clientWidth || 1000, pad = 30, base = 118;
@@ -328,6 +352,7 @@ function drawLattice() {
     p.setAttribute("opacity", "0.85");
     latSvg.appendChild(p);
   }
+  drawLesions(latSvg, xs, base);
   drawRNAPII(latSvg, xs, base);
 }
 

@@ -45,14 +45,14 @@ lef:
     target_tss: true
     lesion_prob: 0.0
     genes:
-      - {tss: 140, tes: 260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 80, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 575, tes: 725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 1110, tes: 1290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 1745, tes: 1955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 2480, tes: 2720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 2360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 3280, tes: 3520, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3160, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 4045, tes: 4255, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3940, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 4675, tes: 4825, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4600, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 120, tes: 200, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 60, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 700, tes: 520, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 820, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 1000, tes: 1150, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1450, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 2000, tes: 2160, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1560, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 2700, tes: 2350, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 2280, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 3280, tes: 3360, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3260, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4300, tes: 3950, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4580, tes: 4700, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4950, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
 
   plugins:
     topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
@@ -105,14 +105,14 @@ polymer:
         restrict_nonbonded_to_chains: true
         replicate_ep_pairs_across_chains: true
         ep_pairs:
-          - [80, 140]
-          - [500, 575]
-          - [1020, 1110]
-          - [1640, 1745]
-          - [2360, 2480]
-          - [3160, 3280]
-          - [3940, 4045]
-          - [4600, 4675]
+          - [60, 120]
+          - [820, 700]
+          - [1450, 1000]
+          - [1560, 2000]
+          - [2280, 2700]
+          - [3260, 3280]
+          - [4360, 4300]
+          - [4950, 4580]
         selective_attraction_energy: 0.0
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0

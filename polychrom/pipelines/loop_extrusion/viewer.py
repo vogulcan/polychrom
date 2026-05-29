@@ -320,6 +320,7 @@ def build_payload(
     lef_cfg: LEFConfig,
     rnapii_positions: Optional[np.ndarray] = None,
     rnapii_states: Optional[np.ndarray] = None,
+    lesions: Optional[np.ndarray] = None,
 ) -> dict:
     """Assemble the JSON payload embedded into the viewer HTML."""
     traj_len, n_lefs, _ = positions.shape
@@ -401,7 +402,14 @@ def build_payload(
                     continue
                 state = int(states[j]) if states is not None and j < len(states) else -1
                 rnap.append([pos - start, int(gene_id), state])
-        frames.append({"c": coh, "s": s_eff, "r": rnap})
+        les = []
+        if lesions is not None and fi < lesions.shape[0]:
+            for site in lesions[fi]:
+                site = int(site)
+                if site < 0 or not in_win(site):
+                    continue
+                les.append(site - start)
+        frames.append({"c": coh, "s": s_eff, "r": rnap, "l": les})
         frame_meter.update()
     frame_meter.done()
     log.info("[viewer] computing insulation + TAD signals + heatmap")
@@ -503,8 +511,11 @@ def run(cfg: ViewerConfig, lef_cfg: LEFConfig) -> Path:
         positions = fh["positions"][:]            # (T, L, 2)
         rnapii_positions = fh["rnapii_positions"][:] if "rnapii_positions" in fh else None
         rnapii_states = fh["rnapii_states"][:] if "rnapii_states" in fh else None
+        lesions = fh["lesions"][:] if "lesions" in fh else None
 
-    payload = build_payload(positions, cfg, lef_cfg, rnapii_positions, rnapii_states)
+    payload = build_payload(
+        positions, cfg, lef_cfg, rnapii_positions, rnapii_states, lesions
+    )
     html = _viewer_template.render(payload, title=payload["title"])
 
     out_path = Path(cfg.output_path)
