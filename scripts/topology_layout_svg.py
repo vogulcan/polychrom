@@ -248,6 +248,14 @@ def build_svg(
     ctcf_sites, elements, eps, genes, tads = derive_annotations(lef_cfg)
     stat_rows, tick_s = _gene_stats(cfg, bp_per_site)
 
+    # Constitutive genes (requires_enhancer=False) don't depend on E-P contact,
+    # so their enhancer arcs are not drawn -- only enhancer-dependent genes show
+    # the E-P arc. geneId == enumerate index of the YAML gene specs.
+    _specs = lef_cfg.topology_kwargs.get("genes", []) or []
+    constitutive_ids = {
+        i for i, s in enumerate(_specs) if not bool(s.get("requires_enhancer", False))
+    }
+
     # Measure actual transcription outputs from the 1D trajectory (generate it
     # if absent). Merged into stat_rows by base gene id.
     measured: Dict[int, dict] = {}
@@ -408,6 +416,8 @@ def build_svg(
 
         # E-P arcs (above backbone)
         for i, pair in enumerate(g["eps"]):
+            if int(pair.get("geneId", i)) in constitutive_ids:
+                continue  # constitutive gene: enhancer shown, but no arc
             e, p = int(pair["e"]), int(pair["p"])
             x0, x1 = xs(min(e, p)), xs(max(e, p))
             mid = (x0 + x1) / 2
