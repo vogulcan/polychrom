@@ -26,14 +26,11 @@ lef:
     rnapii_terminating_block_prob: 0.95
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
-    targeted_load_prob: 0.3
+    targeted_load_prob: 0.0
     loading_window: 2
     target_enhancers: true
     target_tss: true
     lesion_prob: 0.0
-    lesion_lifetime: 300
-    lesion_block_prob: 0.95
-    lesion_max: 64
     genes:
       - {tss: 40,  tes: 90,  load_prob: 0.05, requires_enhancer: true,  load_requires_enhancer: true, enhancer_pos: 130, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
       - {tss: 200, tes: 270, load_prob: 0.05, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1,  elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}

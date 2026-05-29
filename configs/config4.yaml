@@ -28,7 +28,7 @@ lef:
     rnapii_terminating_block_prob: 0.95
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
-    targeted_load_prob: 0.3
+    targeted_load_prob: 0.0
     loading_window: 2
     target_enhancers: true
     target_tss: true

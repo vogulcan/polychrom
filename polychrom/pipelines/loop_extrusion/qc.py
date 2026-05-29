@@ -93,6 +93,84 @@ def boundary_crossing(positions: np.ndarray, boundaries: List[int]) -> Dict[str,
     return out
 
 
+def boundary_crossing_stripes(positions: np.ndarray, boundaries: List[int],
+                              slack: int = 1) -> Dict[str, Any]:
+    """Per-boundary crossings split by whether a crossing LEF is stripe-like.
+
+    A stripe-like crossing spans boundary ``b`` and has exactly one leg at the
+    boundary anchor window around ``b - 1``/``b``. This is conditioned on the
+    same crossing event as ``boundary_crossing`` rather than all LEFs globally.
+    """
+    L = np.minimum(positions[:, :, 0], positions[:, :, 1])
+    R = np.maximum(positions[:, :, 0], positions[:, :, 1])
+    out: Dict[str, Any] = {}
+    event_totals = {"cross": 0, "stripe": 0, "corner": 0, "free": 0}
+
+    for b in boundaries:
+        cross = (L < b) & (R > b)
+        anchor_sites = np.arange(b - 1 - slack, b + slack + 1)
+        n_anchor_legs = np.isin(L, anchor_sites).astype(int) + np.isin(R, anchor_sites).astype(int)
+        stripe = cross & (n_anchor_legs == 1)
+        corner = cross & (n_anchor_legs == 2)
+        free = cross & (n_anchor_legs == 0)
+
+        cross_frames = cross.any(1)
+        stripe_frames = stripe.any(1)
+        corner_frames = corner.any(1)
+        free_frames = free.any(1)
+        n_cross_frames = int(cross_frames.sum())
+        n_cross_events = int(cross.sum())
+        n_stripe_events = int(stripe.sum())
+        n_corner_events = int(corner.sum())
+        n_free_events = int(free.sum())
+
+        event_totals["cross"] += n_cross_events
+        event_totals["stripe"] += n_stripe_events
+        event_totals["corner"] += n_corner_events
+        event_totals["free"] += n_free_events
+
+        out[str(b)] = {
+            "crossing_frame_fraction": float(cross_frames.mean()),
+            "stripe_crossing_frame_fraction": float(stripe_frames.mean()),
+            "corner_crossing_frame_fraction": float(corner_frames.mean()),
+            "free_crossing_frame_fraction": float(free_frames.mean()),
+            "stripe_share_of_crossing_frames": (
+                float(stripe_frames.sum() / n_cross_frames) if n_cross_frames else 0.0
+            ),
+            "crossing_event_count": n_cross_events,
+            "stripe_crossing_event_pct": (
+                float(100 * n_stripe_events / n_cross_events) if n_cross_events else 0.0
+            ),
+            "corner_crossing_event_pct": (
+                float(100 * n_corner_events / n_cross_events) if n_cross_events else 0.0
+            ),
+            "free_crossing_event_pct": (
+                float(100 * n_free_events / n_cross_events) if n_cross_events else 0.0
+            ),
+        }
+
+    keys = [str(b) for b in boundaries]
+    total_cross_events = event_totals["cross"]
+    out["mean"] = {
+        "crossing_frame_fraction": float(np.mean([out[k]["crossing_frame_fraction"] for k in keys])),
+        "stripe_crossing_frame_fraction": float(np.mean([out[k]["stripe_crossing_frame_fraction"] for k in keys])),
+        "corner_crossing_frame_fraction": float(np.mean([out[k]["corner_crossing_frame_fraction"] for k in keys])),
+        "free_crossing_frame_fraction": float(np.mean([out[k]["free_crossing_frame_fraction"] for k in keys])),
+        "stripe_share_of_crossing_frames": float(np.mean([out[k]["stripe_share_of_crossing_frames"] for k in keys])),
+        "crossing_event_count": total_cross_events,
+        "stripe_crossing_event_pct": (
+            float(100 * event_totals["stripe"] / total_cross_events) if total_cross_events else 0.0
+        ),
+        "corner_crossing_event_pct": (
+            float(100 * event_totals["corner"] / total_cross_events) if total_cross_events else 0.0
+        ),
+        "free_crossing_event_pct": (
+            float(100 * event_totals["free"] / total_cross_events) if total_cross_events else 0.0
+        ),
+    }
+    return out
+
+
 def asymmetry_index(positions: np.ndarray) -> float:
     """Mean | dleft - dright | / (|dleft| + |dright|) per cohesin between frames.
 
