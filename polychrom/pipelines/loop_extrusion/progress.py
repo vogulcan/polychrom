@@ -67,18 +67,21 @@ def stepped_run(
     total_steps: int,
     stage: str,
     *,
-    chunks: int = 20,
+    chunks: int = 50,
     min_interval: float = 2.0,
 ) -> None:
     """Run a long integrator burn-in in chunks, logging ETA between them.
 
     ``step_fn(n)`` advances ``n`` steps (e.g. ``sim.integrator.step``). Splits
     ``total_steps`` into ~``chunks`` pieces so silent multi-million-step
-    relaxations report progress instead of hanging quietly.
+    relaxations report progress instead of hanging quietly. An immediate
+    ``0/total`` line is logged up front so the meter's presence is visible
+    before the first chunk (which carries the first ETA) finishes.
     """
     total = int(total_steps)
     if total <= 0:
         return
+    log.info("[%s] 0/%d (0.0%%) running... (first ETA after 1 chunk)", stage, total)
     chunk = max(1, total // max(1, chunks))
     meter = ProgressMeter(total, stage, min_interval=min_interval)
     done = 0

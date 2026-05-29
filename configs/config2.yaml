@@ -3,41 +3,32 @@
 # (E-P sites, loading sites, future lesion sites). Isolates the effect of
 # transcription on cohesin vs config1.
 lef:
-  chain_length: 10000
-  num_chains: 10
+  chain_length: 5000
+  num_chains: 3
   separation: 240
   lifetime: 150
   lifetime_stalled: 150
   warmup_steps: 10000
-  trajectory_length: 60000
+  trajectory_length: 30000
   chunk_size: 50
   seed: 1001
   max_rnapii: 0                 # transcription OFF
 
   topology_kwargs:
-    tad_positions: [400, 900, 1500, 2200, 3000, 3400, 3900, 4500, 5200, 6000, 6400, 6900, 7500, 8200, 9000, 9500]
+    tad_positions: [400, 900, 1500, 2200, 3000, 3800, 4500]
     # Per-anchor CTCF strength, keyed by chain-relative boundary position
     # (0 + chain end + each tad_positions value). Tune any anchor on its own;
     # positions left out fall back to default_boundary_strength.
     boundary_strength:
-      0:     0.5
-      400:   0.5
-      900:   0.5
-      1500:  0.5
-      2200:  0.5
-      3000:  0.5
-      3400:  0.5
-      3900:  0.5
-      4500:  0.5
-      5200:  0.5
-      6000:  0.5
-      6400:  0.5
-      6900:  0.5
-      7500:  0.5
-      8200:  0.5
-      9000:  0.5
-      9500:  0.5
-      10000: 0.5
+      0:    0.5
+      400:  0.5
+      900:  0.5
+      1500: 0.5
+      2200: 0.5
+      3000: 0.5
+      3800: 0.5
+      4500: 0.5
+      5000: 0.5
     default_boundary_strength: 0.5
     release_prob: 0.0
     include_chromosome_ends: true
@@ -61,18 +52,9 @@ lef:
       - {tss: 1110, tes: 1290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
       - {tss: 1745, tes: 1955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
       - {tss: 2480, tes: 2720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 2360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 3140, tes: 3260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3080, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 3575, tes: 3725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 4110, tes: 4290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 4745, tes: 4955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 5480, tes: 5720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 5360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 6140, tes: 6260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 6080, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 6575, tes: 6725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 6500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 7110, tes: 7290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 7020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 7745, tes: 7955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 7640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 8480, tes: 8720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 8360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 9175, tes: 9325, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 9100, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 9675, tes: 9825, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 9600, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 3280, tes: 3520, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3160, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4045, tes: 4255, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3940, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4675, tes: 4825, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4600, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
 
   plugins:
     topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
@@ -90,7 +72,7 @@ viewer:
   bridge_cost: 1.0
   insulation_score_window: 150
   site_start: 0
-  site_end: 10000
+  site_end: 5000
 
 polymer:
   platform: cuda
@@ -130,18 +112,9 @@ polymer:
           - [1020, 1110]
           - [1640, 1745]
           - [2360, 2480]
-          - [3080, 3140]
-          - [3500, 3575]
-          - [4020, 4110]
-          - [4640, 4745]
-          - [5360, 5480]
-          - [6080, 6140]
-          - [6500, 6575]
-          - [7020, 7110]
-          - [7640, 7745]
-          - [8360, 8480]
-          - [9100, 9175]
-          - [9600, 9675]
+          - [3160, 3280]
+          - [3940, 4045]
+          - [4600, 4675]
         selective_attraction_energy: 0.0
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0
@@ -154,7 +127,7 @@ polymer:
 contacts:
   replicate_map_starts_across_chains: true
   map_starts: [0]
-  map_size: 10000
+  map_size: 5000
   cutoff: 2.0
   num_processes: 12
   verbose: true
