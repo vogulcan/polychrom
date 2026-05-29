@@ -89,7 +89,7 @@ lef:
     lesion:             polychrom.pipelines.loop_extrusion.plugins.lesions:update_lesions
 
 viewer:
-  max_frames: 10000
+  max_frames: 500
   bridge_cost: 1.0
   insulation_score_window: 150
   site_start: 0

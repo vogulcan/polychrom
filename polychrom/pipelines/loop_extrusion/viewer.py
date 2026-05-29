@@ -24,6 +24,7 @@ import numpy as np
 
 from . import _viewer_template
 from .config import LEFConfig, ViewerConfig, resolve_plugin
+from .progress import ProgressMeter, log
 
 
 # --------------------------------------------------------------------------- #
@@ -356,6 +357,12 @@ def build_payload(
 
     frames: List[dict] = []
     sampled_arcs: List[List[Tuple[int, int]]] = []
+    log.info(
+        "[viewer] building 1D payload: %d/%d frames sampled, %d E-P pairs "
+        "(bridge shortest-paths per frame)",
+        len(frame_idx), traj_len, len(display_eps),
+    )
+    frame_meter = ProgressMeter(len(frame_idx), "viewer:frames")
     for fi in frame_idx:
         fi = int(fi)
         legs = positions[fi]                      # (n_lefs, 2)
@@ -395,6 +402,9 @@ def build_payload(
                 state = int(states[j]) if states is not None and j < len(states) else -1
                 rnap.append([pos - start, int(gene_id), state])
         frames.append({"c": coh, "s": s_eff, "r": rnap})
+        frame_meter.update()
+    frame_meter.done()
+    log.info("[viewer] computing insulation + TAD signals + heatmap")
 
     gene_spans = []
     for gene in genes:
@@ -488,6 +498,7 @@ def run(cfg: ViewerConfig, lef_cfg: LEFConfig) -> Path:
     if not h5_path.exists():
         print(f"[viewer]   {h5_path} not found -> running lef stage to build it")
         h5_path = lef_stage.run(lef_cfg)          # writes lef_cfg.output_path
+    log.info("[viewer] loading positions from %s", h5_path)
     with h5py.File(h5_path, "r") as fh:
         positions = fh["positions"][:]            # (T, L, 2)
         rnapii_positions = fh["rnapii_positions"][:] if "rnapii_positions" in fh else None
