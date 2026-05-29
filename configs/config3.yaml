@@ -2,7 +2,7 @@
 # Models UV-induced strengthening of CTCF/cohesin insulation on top of tx loss.
 lef:
   chain_length: 10000
-  num_chains: 1
+  num_chains: 10
   separation: 240
   lifetime: 150
   lifetime_stalled: 150

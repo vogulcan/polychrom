@@ -4,7 +4,7 @@
 # act purely as cohesin barriers (no Pol II to lesion-stall) = full post-UV state.
 lef:
   chain_length: 10000
-  num_chains: 1
+  num_chains: 10
   separation: 240
   lifetime: 150
   lifetime_stalled: 150
