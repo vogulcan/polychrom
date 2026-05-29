@@ -35,6 +35,8 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     STATE_POISED,
     STATE_TERMINATING,
     build_genes,
+    compute_ep_contacts,
+    enhancer_factor,
     load_rnapii,
     stateful_translocate_rnapii,
     translocate_rnapii,
@@ -1163,3 +1165,131 @@ def test_sticky_updater_activates_gene_body_only_when_elongating():
     assert active1 == set()                       # gene1 paused, gene0 gone
     assert all(force.params[m][0] == 0.0 for m in gene_bodies[0])
     assert force.context_updates == 2
+
+
+# --------------------------------------------------------------------------- #
+# Multi-enhancer genes (shadow / super-enhancer integration)
+# --------------------------------------------------------------------------- #
+def test_build_genes_accepts_enhancer_list_and_legacy_scalar():
+    g_list = build_genes([{"tss": 10, "tes": 50, "enhancers": [5, 90, 120]}])[0]
+    assert g_list.enhancers == (5, 90, 120)
+    assert g_list.enhancer_pos == 5                  # legacy mirror = first
+    assert g_list.enhancer_logic == "additive"       # empirical default
+    g_scalar = build_genes([{"tss": 10, "tes": 50, "enhancer_pos": 7}])[0]
+    assert g_scalar.enhancers == (7,)
+    assert g_scalar.enhancer_pos == 7
+
+
+def test_build_genes_rejects_requires_enhancer_without_enhancers():
+    with pytest.raises(ValueError):
+        build_genes([{"tss": 10, "tes": 50, "requires_enhancer": True}])
+    with pytest.raises(ValueError):
+        build_genes([{"tss": 10, "tes": 50, "enhancer_logic": "bogus", "enhancers": [5]}])
+
+
+def test_gene_post_init_syncs_scalar_constructor():
+    # Direct Gene(enhancer_pos=...) construction (used by older tests) still
+    # populates the canonical enhancers tuple.
+    g = Gene(gene_id=0, tss=2, tes=6, direction=1, load_prob=1.0, enhancer_pos=5)
+    assert g.enhancers == (5,)
+
+
+def test_compute_ep_contacts_counts_enhancers_in_contact():
+    # TSS=100, enhancers at 50 (bracketed by 40-110) and 900 (not).
+    gene = build_genes([{"tss": 100, "tes": 130, "enhancers": [50, 900]}])[0]
+    cohesins = [Cohesin(Leg(40), Leg(110))]
+    contacts = compute_ep_contacts(cohesins, [gene], tolerance=2)
+    assert contacts == {0: 1}                         # one of two enhancers in loop
+    # both enhancers bracketed -> count 2
+    cohesins2 = [Cohesin(Leg(40), Leg(950))]
+    assert compute_ep_contacts(cohesins2, [gene], tolerance=2) == {0: 2}
+    # none bracketed -> gene absent (membership still tests "has contact")
+    assert compute_ep_contacts([Cohesin(Leg(60), Leg(80))], [gene]) == {}
+
+
+def test_enhancer_factor_logics():
+    base = dict(gene_id=0, tss=10, tes=50, direction=1, load_prob=1.0)
+    any_g = Gene(**base, enhancers=(1, 2, 3), enhancer_logic="any")
+    all_g = Gene(**base, enhancers=(1, 2, 3), enhancer_logic="all")
+    add_g = Gene(**base, enhancers=(1, 2, 3), enhancer_logic="additive")
+    syn_g = Gene(**base, enhancers=(1, 2, 3), enhancer_logic="synergistic",
+                 enhancer_synergy=2.0)
+    # gate closed when nothing in contact
+    for g in (any_g, all_g, add_g, syn_g):
+        assert enhancer_factor(g, 0) == 0.0
+    assert enhancer_factor(any_g, 1) == 1.0
+    assert enhancer_factor(all_g, 2) == 0.0           # needs all 3
+    assert enhancer_factor(all_g, 3) == 1.0
+    assert enhancer_factor(add_g, 2) == 2.0           # linear dosage
+    assert enhancer_factor(add_g, 5) == 3.0           # capped at k
+    assert enhancer_factor(syn_g, 2) == 4.0           # 2 ** 2
+    # single-enhancer gene == old boolean behaviour for every logic
+    for logic in ("any", "all", "additive", "synergistic"):
+        g1 = Gene(**base, enhancers=(1,), enhancer_logic=logic)
+        assert enhancer_factor(g1, 0) == 0.0
+        assert enhancer_factor(g1, 1) == 1.0
+
+
+def test_load_rnapii_additive_dosage_scales_recruitment():
+    # additive 2-in-contact doubles load_prob (0.3 -> 0.6); single -> 0.3.
+    # seed(0) -> first np.random.random() == 0.5488: loads at 0.6, not at 0.3.
+    gene = build_genes([{"tss": 2, "tes": 6, "load_prob": 0.3,
+                         "enhancers": [1, 9], "load_requires_enhancer": True}])[0]
+    for n_contact, should_load in [(2, True), (1, False)]:
+        np.random.seed(0)
+        occupied = np.zeros(10, dtype=np.int8)
+        rnapiis = []
+        args = {"genes": [gene], "rnapii_by_pos": {},
+                "current_ep_contacts": {0: n_contact}}
+        load_rnapii(rnapiis, occupied, args)
+        assert (len(rnapiis) == 1) is should_load
+
+
+def test_stateful_pause_release_or_vs_all_logic():
+    # One enhancer in contact (50-TSS100); the other (900) is not.
+    specs = {"tss": 100, "tes": 130, "enhancers": [50, 900],
+             "requires_enhancer": True, "pause_release_prob": 1.0,
+             "elongation_step_prob": 0.0}
+    cohesins = [Cohesin(Leg(40), Leg(110))]          # brackets only enhancer 50
+    occupied = np.zeros(1000, dtype=np.int8)
+
+    def run(logic):
+        gene = build_genes([{**specs, "enhancer_logic": logic}])[0]
+        r = RNAPII(pos=100, gene_id=0, direction=1)
+        r.attrs["state"] = STATE_PAUSED
+        args = {"genes": [gene], "ep_contact_tolerance": 2,
+                "rnapii_by_pos": {100: r}, "cohesin_leg_by_pos": {},
+                "N": 1000, "chain_length": 1000}
+        stateful_translocate_rnapii([r], cohesins, occupied, args)
+        return r.attrs["state"]
+
+    assert run("any") == STATE_ELONGATING            # redundant: 1 suffices
+    assert run("all") == STATE_PAUSED                 # obligate: needs both
+
+
+def test_build_payload_multi_enhancer_gene_emits_arc_per_enhancer():
+    lef_cfg = LEFConfig(
+        chain_length=400, num_chains=1, separation=400,
+        topology_kwargs={"tad_positions": [],
+                         "genes": [{"tss": 200, "tes": 240,
+                                    "enhancers": [20, 360]}]},
+    )
+    lef_cfg.plugins.topology = PluginSpec(
+        target="polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_topology"
+    )
+    pos = np.array([[[18, 202]]], dtype=np.int32)
+    payload = build_payload(pos, ViewerConfig(stride=1, max_frames=0), lef_cfg)
+    assert [p["label"] for p in payload["eps"]] == ["E0-P0", "E1-P0"]
+    assert all(p["geneId"] == 0 for p in payload["eps"])
+    enh = sorted(e["position"] for e in payload["elements"] if e["type"] == "enhancer")
+    assert enh == [20, 360]
+
+
+def test_expand_genes_offsets_enhancer_list_across_chains():
+    cfg = LEFConfig(chain_length=500, num_chains=2, separation=500)
+    args = topology_plugins.gene_aware_convergent_tad_topology(
+        cfg,
+        genes=[{"tss": 200, "tes": 250, "enhancers": [100, 300]}],
+        replicate_genes_across_chains=True,
+    )
+    assert [g.enhancers for g in args["genes"]] == [(100, 300), (600, 800)]

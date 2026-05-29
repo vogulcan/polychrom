@@ -132,17 +132,23 @@ def _expand_genes_across_chains(
         offset = chain_idx * cfg.chain_length
         for spec in base:
             out = dict(spec)
-            for key in ("tss", "tes", "enhancer_pos"):
-                if key not in out or out[key] is None:
-                    continue
-                site = int(out[key])
+
+            def _shift(site: int, label: str) -> int:
+                site = int(site)
                 if not (0 <= site < cfg.chain_length):
                     raise ValueError(
-                        f"Gene {key}={site} is outside one chain of length "
+                        f"Gene {label}={site} is outside one chain of length "
                         f"{cfg.chain_length}; disable replicate_genes_across_chains "
                         "for absolute coordinates"
                     )
-                out[key] = site + offset
+                return site + offset
+
+            for key in ("tss", "tes", "enhancer_pos"):
+                if key not in out or out[key] is None:
+                    continue
+                out[key] = _shift(out[key], key)
+            if out.get("enhancers"):
+                out["enhancers"] = [_shift(e, "enhancers") for e in out["enhancers"]]
             expanded.append(out)
     return expanded
 
@@ -163,7 +169,7 @@ def _set_loading_sites(
     """
     sites: set = set()
     if target_enhancers:
-        sites |= {g.enhancer_pos for g in gene_objs if g.enhancer_pos is not None}
+        sites |= {e for g in gene_objs for e in g.enhancers}
     if target_tss:
         sites |= {g.tss for g in gene_objs}
     args["loading_sites"] = sorted(int(s) for s in sites)
@@ -216,6 +222,8 @@ def gene_aware_topology(
     rnapii_stall_prob: float = 0.4,
     rnapii_push_prob: float = 0.3,
     rnapii_headon_push_prob: float = 0.0,
+    rnapii_pause_cohesin_restraint: float = 1.0,
+    rnapii_pause_restraint_window: int = 1,
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
@@ -267,6 +275,8 @@ def gene_aware_topology(
     args["rnapii_stall_prob"] = float(rnapii_stall_prob)
     args["rnapii_push_prob"] = float(rnapii_push_prob)
     args["rnapii_headon_push_prob"] = float(rnapii_headon_push_prob)
+    args["rnapii_pause_cohesin_restraint"] = float(rnapii_pause_cohesin_restraint)
+    args["rnapii_pause_restraint_window"] = int(rnapii_pause_restraint_window)
     fallback_block_prob = float(rnapii_block_prob)
     args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
     args["rnapii_paused_block_prob"] = (
@@ -321,6 +331,8 @@ def gene_aware_convergent_tad_topology(
     rnapii_stall_prob: float = 0.4,
     rnapii_push_prob: float = 0.3,
     rnapii_headon_push_prob: float = 0.0,
+    rnapii_pause_cohesin_restraint: float = 1.0,
+    rnapii_pause_restraint_window: int = 1,
     rnapii_poised_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
@@ -364,6 +376,8 @@ def gene_aware_convergent_tad_topology(
     args["rnapii_stall_prob"] = float(rnapii_stall_prob)
     args["rnapii_push_prob"] = float(rnapii_push_prob)
     args["rnapii_headon_push_prob"] = float(rnapii_headon_push_prob)
+    args["rnapii_pause_cohesin_restraint"] = float(rnapii_pause_cohesin_restraint)
+    args["rnapii_pause_restraint_window"] = int(rnapii_pause_restraint_window)
     fallback_block_prob = float(rnapii_block_prob)
     args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
     args["rnapii_paused_block_prob"] = (

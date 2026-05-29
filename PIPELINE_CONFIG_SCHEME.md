@@ -373,6 +373,8 @@ Common `gene_aware_*` kwargs:
 | `rnapii_stall_prob` | `0.4` | Intrinsic probability that elongating RNAPII stalls on a cohesin obstacle. |
 | `rnapii_push_prob` | `0.3` | Probability that an elongating RNAPII pushes a co-directional cohesin leg. |
 | `rnapii_headon_push_prob` | `0.0` | Probability that an elongating RNAPII pushes a head-on cohesin leg. |
+| `rnapii_pause_cohesin_restraint` | `1.0` | Cohesin gatekeeper (Tei et al. 2026): multiplier (`<1`) applied to a PAUSED RNAPII's release probability when a cohesin leg sits within `rnapii_pause_restraint_window` sites, modeling cohesin delaying pause release. `1.0` disables it (no restraint). |
+| `rnapii_pause_restraint_window` | `1` | Site radius for detecting a cohesin leg adjacent to a paused RNAPII; only consulted when `rnapii_pause_cohesin_restraint < 1.0`. |
 | `rnapii_poised_block_prob` | `1.0` | Probability that POISED RNAPII blocks an incoming cohesin leg. |
 | `rnapii_paused_block_prob` | `rnapii_block_prob` | Probability that PAUSED RNAPII blocks an incoming cohesin leg. |
 | `rnapii_elongating_block_prob` | `rnapii_block_prob` | Probability that ELONGATING RNAPII blocks an incoming cohesin leg. |
@@ -415,6 +417,24 @@ E-P contact during the 1D stage is a loop-containment proxy. A gene with
 `enhancer_pos` is considered in contact when at least one cohesin loop brackets
 the enhancer and promoter, with `ep_contact_tolerance` sites of slack. This is
 used for `requires_enhancer` and `load_requires_enhancer`.
+
+Cohesin plays two opposing roles on transcription, both representable here:
+
+* **Activation (E-P arm).** A cohesin loop bracketing the enhancer and promoter
+  satisfies `requires_enhancer` / `load_requires_enhancer`, enabling pause
+  release and/or loading. Distal (long-range) genes therefore depend on cohesin
+  loops, while short-range / constitutive genes (`requires_enhancer: false`) do
+  not — mirroring the cohesin-dependent vs cohesin-independent loop classes of
+  Kim et al. 2026.
+* **Restraint (gatekeeper arm).** When `rnapii_pause_cohesin_restraint < 1.0`, a
+  cohesin leg physically within `rnapii_pause_restraint_window` sites of a PAUSED
+  RNAPII multiplies that gene's release probability by the restraint factor,
+  delaying pause release (Tei et al. 2026). On cohesin loss the restraint is
+  relieved (faster release), which partially compensates for lost recruitment.
+
+The restraint is evaluated inside `stateful_translocate_rnapii` after the E-P
+gate; with the default `1.0` it is a no-op, so configs that do not set it behave
+exactly as before.
 
 `translocate_with_rnapii` is also the built-in translocator that knows about
 lesion barriers. It can be used even when RNAPII plugin slots are `null`, as
@@ -510,20 +530,20 @@ into temporary harmonic bonds, and runs OpenMM molecular dynamics.
 | `output_folder` | `trajectory` | Output folder for HDF5 trajectory blocks; overridden by CLI `output_dir`. |
 | `platform` | `cuda` | OpenMM platform name. |
 | `gpu` | `"0"` | CUDA GPU selector passed as `GPU`. |
-| `integrator` | `variableLangevin` | OpenMM integrator name used by `Simulation`. |
-| `error_tol` | `0.01` | Error tolerance for variable-step integrators. |
-| `collision_rate` | `0.03` | Langevin collision/friction rate. |
-| `precision` | `mixed` | CUDA precision mode. |
-| `seed` | `null` | Optional NumPy/OpenMM seed. Per restart chunk, OpenMM seed is offset by iteration. |
-| `density` | `0.1` | Density used to size the initial box and optional periodic box. |
-| `pbc` | `true` | If true, run in a periodic cubic box. Set false when the force builder supplies confinement. |
-| `md_steps_per_block` | `750` | OpenMM integrator steps per LEF frame. |
-| `save_every_blocks` | `10` | Save one 3D conformation every N LEF frames. |
-| `restart_every_blocks` | `100` | Number of LEF frames in each dynamic-bond rebuild chunk. |
-| `initial_relaxation_steps` | `0` | Bare-polymer relaxation before SMC bonds are inserted. |
-| `pre_recording_steps` | `0` | Dynamics with SMC bonds before the first recorded block. |
-| `smc_bond_wiggle` | `0.2` | SMC harmonic-bond wiggle distance; smaller means stiffer. |
-| `smc_bond_dist` | `0.5` | SMC bond rest length in simulation length units. |
+| `integrator` | `variableLangevin` | OpenMM integrator. `variableLangevin` adapts its timestep to keep per-step error under `error_tol`; fixed-step integrators (e.g. `langevin`) ignore `error_tol`. Langevin integrators couple the polymer to a heat bath, so dynamics are Brownian/overdamped rather than ballistic. |
+| `error_tol` | `0.01` | Local integration error target for variable-step integrators. Smaller is more accurate but takes more substeps per block (slower); larger risks instability/blowups. Ignored by fixed-step integrators. |
+| `collision_rate` | `0.03` | Langevin friction/collision coefficient (inverse time units). High values give strongly damped, diffusive motion and stable but slow conformational sampling; low values give near-ballistic motion that explores faster but can be unstable. |
+| `precision` | `mixed` | CUDA precision mode (`single`, `mixed`, `double`). `mixed` is the usual speed/accuracy trade-off on GPU. |
+| `seed` | `null` | Optional NumPy/OpenMM seed. The OpenMM integrator seed is offset by the restart-chunk iteration index so each chunk has independent thermal noise while staying reproducible. |
+| `density` | `0.1` | Monomer number density (monomers per unit volume) used to size the initial growth box and, when `pbc: true`, the periodic cube. Sets crowding of the initial conformation; the simulated steady-state density is set by whatever confinement the force builder adds. |
+| `pbc` | `true` | If true, run in a periodic cubic box sized from `density`. Set false when the force builder supplies its own confinement (e.g. a spherical wall); otherwise the polymer is unbounded. |
+| `md_steps_per_block` | `750` | OpenMM integrator steps advanced per LEF frame (one "block"). More steps per block let the polymer relax further toward equilibrium between cohesin moves; fewer steps keep cohesin translocation fast relative to polymer relaxation. |
+| `save_every_blocks` | `10` | Save one 3D conformation every N LEF frames. Controls trajectory sampling density on disk. |
+| `restart_every_blocks` | `100` | LEF frames per dynamic-bond rebuild chunk. The updater pre-builds all SMC bonds needed in the chunk, then toggles them; larger chunks mean fewer context rebuilds but more inactive bonds resident in the OpenMM context. |
+| `initial_relaxation_steps` | `0` | Bare-polymer dynamics (no SMC bonds) run once at the start, after an energy minimization, to relax the artificial initial conformation before loop extrusion begins. |
+| `pre_recording_steps` | `0` | Dynamics run with SMC bonds active but before the first recorded block, to let loops equilibrate so early frames are not transient. |
+| `smc_bond_wiggle` | `0.2` | Wiggle distance of the harmonic bond representing a captured cohesin loop; bond energy = 1 kT at this extension. Smaller = stiffer loop anchor (tighter chord), larger = looser. Bond stiffness is `kbondScalingFactor / wiggle^2`. |
+| `smc_bond_dist` | `0.5` | Rest length of the SMC loop bond in simulation length units. Sets the spatial separation enforced between the two cohesin-anchored monomers. |
 | `max_data_length` | `100` | Maximum saved conformations per HDF5 block file. |
 | `overwrite` | `true` | Whether the reporter may overwrite existing trajectory output. |
 | `plugins` | default `PolymerPlugins` | Force builder and initial conformation hooks. |
@@ -537,6 +557,10 @@ Hard requirements:
 The dynamic bond updater looks ahead within each restart chunk, creates every
 SMC bond needed in that chunk, and then toggles those bonds active/inactive by
 changing force parameters in the OpenMM context.
+
+`md_steps_per_block`, `save_every_blocks`, and the integrator settings define
+the 3D clock in reduced units. To convert MD steps or blocks into seconds, see
+[Mapping Simulation Time to Real Time](#mapping-simulation-time-to-real-time).
 
 ### Polymer Plugins
 
@@ -560,18 +584,20 @@ initial_conformation(num_sites=n_sites, box=box, **kwargs)
 ### Built-In Force Builders
 
 `default_force_builder` builds separate linear chains with harmonic backbone
-bonds, angle force, and polynomial repulsion.
+bonds, angle force, and polynomial repulsion. It has no attraction terms and no
+confinement, so it is the right baseline for a phantom/repulsive chain or for
+use with `pbc: true`.
 
 Common kwargs:
 
 | Kwarg | Default | Description |
 | --- | ---: | --- |
-| `bond_length` | `1.0` | Backbone bond rest length. |
-| `bond_wiggle` | `0.1` | Backbone bond flexibility. |
-| `angle_k` | `1.5` | Angle-force stiffness. |
-| `repulsive_trunc` | `1.5` | Polynomial repulsion truncation. |
-| `repulsive_radius_mult` | `1.05` | Repulsive radius multiplier. |
-| `restrict_nonbonded_to_chains` | `false` | Restrict nonbonded interactions to pairs within the same chain. |
+| `bond_length` | `1.0` | Backbone bond rest length (monomer spacing along the chain). |
+| `bond_wiggle` | `0.1` | Backbone bond flexibility: bond energy = 1 kT at this extension, so stiffness scales as `1/wiggle^2`. Smaller = stiffer, more inextensible backbone. |
+| `angle_k` | `1.5` | Bending stiffness of the three-monomer angle term; potential is `0.5 * k * angle^2` kT about a straight (`pi`) rest angle. Higher `k` raises persistence length (stiffer chain). |
+| `repulsive_trunc` | `1.5` | Energy (in kT) of the polynomial repulsion at full overlap (`r=0`). This is a *soft* core: finite at contact, so chains can pass through each other at finite cost. Higher = harder to cross (more topologically constrained). |
+| `repulsive_radius_mult` | `1.05` | Repulsion range as a multiple of the unit contact length; the potential reaches zero at this radius. |
+| `restrict_nonbonded_to_chains` | `false` | Restrict nonbonded interactions to pairs within the same chain (via per-chain interaction groups). Use for replicate chains that must not see each other. |
 
 `paper_force_builder` builds linear chains with harmonic backbone bonds, optional
 angle force, selective soft-core nonbonded interactions, optional E-P pair
@@ -581,29 +607,30 @@ Common kwargs:
 
 | Kwarg | Default | Description |
 | --- | ---: | --- |
-| `sticky_particles` | `[]` | Flat list of sticky monomer indices for the `selective_SSW` path. |
-| `ep_pairs` | `[]` | Pair list `[[enhancer, promoter], ...]`; enables pair-specific `heteropolymer_SSW` attraction. |
-| `replicate_ep_pairs_across_chains` | `false` | Treat E-P pair coordinates as chain-relative and copy to each chain. |
-| `extra_hard_particles` | `[]` | Monomers marked extra hard in the nonbonded force. |
-| `transcribed_particles` | `[]` | Usually filled by the polymer stage when Pol II self-affinity is active. |
-| `polii_self_affinity` | `0.0` | Adds a transcribed monomer type with self-attraction as a multiple of `selective_attraction_energy`. |
-| `bond_length` | `1.0` | Backbone bond rest length. |
-| `bond_wiggle` | `0.1` | Backbone bond flexibility. |
-| `angle_k` | `null` | Angle stiffness; `null` disables angle force. |
-| `repulsion_energy` | `50.0` | Soft excluded-volume barrier height. |
-| `repulsion_radius` | `1.05` | Repulsion radius. |
-| `attraction_energy` | `0.0` | Generic all-monomer attraction depth. |
-| `attraction_radius` | `2.0` | Generic attraction radius. |
-| `selective_attraction_energy` | `1.0` | Pair/type-specific attraction strength. |
-| `selective_repulsion_energy` | `0.0` | Pair/type-specific repulsion strength. |
-| `confinement_density` | `0.2` | Density used for spherical confinement. |
-| `confinement_k` | `5.0` | Confinement wall stiffness. |
-| `restrict_nonbonded_to_chains` | `false` | Restrict nonbonded interactions to same-chain pairs. |
-| `confinement_per_chain` | `false` | Add one spherical confinement per chain instead of one global sphere. |
+| `sticky_particles` | `[]` | Flat list of sticky monomer indices for the `selective_SSW` path (used only when `ep_pairs` is empty). All sticky particles attract each other equally; there is no pair specificity. |
+| `ep_pairs` | `[]` | Pair list `[[enhancer, promoter], ...]`. When non-empty, switches the nonbonded force to `heteropolymer_SSW` with pair-specific attraction (each cognate E-P pair attracts; non-cognate sticky sites do not). |
+| `replicate_ep_pairs_across_chains` | `false` | Treat E-P pair coordinates as chain-relative and copy them to each chain by adding `chain_idx * chain_length`. |
+| `extra_hard_particles` | `[]` | Monomers given extra repulsion (`selective_repulsion_energy`) on top of the base barrier; keeps very sticky sites from collapsing the chain. |
+| `transcribed_particles` | `[]` | Flat list of transcribable (gene-body) monomers eligible for Pol II self-affinity. Usually filled by the polymer stage from the LEF file rather than set by hand. |
+| `polii_self_affinity` | `0.0` | Self-attraction of the transcribed monomer type, as a *multiple* of `selective_attraction_energy`. `0` disables Pol II compaction; the per-frame active subset is toggled by `StickyUpdater`. |
+| `bond_length` | `1.0` | Backbone bond rest length (monomer spacing). |
+| `bond_wiggle` | `0.1` | Backbone bond flexibility: energy = 1 kT at this extension, stiffness `~1/wiggle^2`. |
+| `angle_k` | `null` | Bending stiffness in kT; `null` omits the angle force entirely, leaving a fully flexible chain (no persistence length). |
+| `repulsion_energy` | `50.0` | Height in kT of the soft excluded-volume barrier at full overlap. Large values (e.g. tens of kT) make overlaps rare, approaching a self-avoiding chain; small values let chains pass through each other. |
+| `repulsion_radius` | `1.05` | Radius at which repulsion reaches zero (effective monomer hard-core size). |
+| `attraction_energy` | `0.0` | Depth in kT of the *generic* attraction felt by every monomer pair. `0` = purely repulsive background; positive values induce global compaction/poor-solvent behavior. |
+| `attraction_radius` | `2.0` | Outer range of the attractive well; also the nonbonded cutoff distance. |
+| `selective_attraction_energy` | `1.0` | Depth in kT of the *extra* attraction applied only to selected pairs/types (E-P pairs, or sticky particles). This is the prefactor multiplying the interaction matrix; the main knob for E-P loop/compartment strength. |
+| `selective_repulsion_energy` | `0.0` | Extra repulsion in kT applied to `extra_hard_particles`. |
+| `confinement_density` | `0.2` | Target monomer density used to compute the spherical confinement radius (`r = (3N / 4*pi*density)^(1/3)`). Higher density = smaller sphere = more crowding. |
+| `confinement_k` | `5.0` | Steepness of the confining wall in kT/length. Higher = harder wall; the polymer is squeezed more sharply at the boundary. |
+| `restrict_nonbonded_to_chains` | `false` | Restrict nonbonded (repulsion + attraction) to same-chain pairs via per-chain interaction groups. Required for replicate chains and for Pol II self-affinity with `num_chains > 1`. |
+| `confinement_per_chain` | `false` | Add one spherical confinement per chain (each replicate confined separately) instead of one global sphere over all monomers. |
 
 When `ep_pairs` is non-empty, `paper_force_builder` assigns each listed sticky
-site a distinct type and turns on attraction only between listed cognate pairs.
-Shared enhancer or promoter sites are allowed by listing multiple pairs.
+site a distinct monomer type and writes a symmetric interaction matrix so that
+attraction is turned on only between listed cognate pairs. Shared enhancer or
+promoter sites are allowed by listing multiple pairs.
 
 When `polii_self_affinity > 0`, the polymer stage enables transcription-driven
 compaction only if the LEF file contains RNAPII and gene datasets. It marks the
@@ -611,6 +638,62 @@ gene bodies of genes that currently carry at least one ELONGATING RNAPII with a
 transcribed monomer type for that frame. With `num_chains > 1`, this feature
 requires `restrict_nonbonded_to_chains: true` so replicate chains do not
 self-attract across chains.
+
+### Force Model Details
+
+The 3D stage is an OpenMM molecular-dynamics simulation. All energies are in
+units of `kT`, all lengths in simulation length units (one monomer ~ one unit).
+At each LEF frame the force builder's static forces stay fixed while the SMC
+loop bonds are toggled to follow the 1D trajectory. The total potential is the
+sum of the forces below.
+
+**Backbone (harmonic bonds).** Consecutive monomers on a chain are joined by a
+harmonic spring with rest length `bond_length` and stiffness set so the energy
+is 1 kT when the bond is stretched by `bond_wiggle`. This is what makes the
+chain a connected polymer; `bond_wiggle` controls how extensible it is.
+
+**Bending (angle force).** An optional harmonic angle term over each consecutive
+triplet, `0.5 * angle_k * angle^2` kT about a straight rest angle, gives the
+chain a bending rigidity / persistence length. `angle_k: null` removes it for a
+freely-jointed chain.
+
+**Excluded volume + attraction (nonbonded SSW).** The nonbonded force is a
+smooth square-well: a soft repulsive core out to `repulsion_radius` (height
+`repulsion_energy` at full overlap, with continuous value and first derivative),
+followed by an attractive well that returns to zero at `attraction_radius`. The
+repulsion is *soft*, so strand crossing is allowed at finite energy cost. Two
+selective variants sit on top of this base:
+
+* `selective_SSW` — used when only `sticky_particles` are given. Listed sticky
+  monomers get `selective_attraction_energy` of extra mutual attraction;
+  everything else is purely repulsive. Attraction is all-to-all among sticky
+  sites (no pairing).
+* `heteropolymer_SSW` — used when `ep_pairs` (or Pol II) are present. Each
+  special site is a monomer *type*, and the per-type interaction matrix decides
+  which types attract. The extra well depth for a pair `(i, j)` is
+  `selective_attraction_energy * interactionMatrix[type_i, type_j]`, so cognate
+  E-P pairs attract with depth `selective_attraction_energy` while unrelated
+  special sites do not. `extra_hard_particles` raise the repulsion by
+  `selective_repulsion_energy` to stop strong stickers from collapsing.
+
+**Confinement.** When `pbc: false`, a spherical wall keeps monomers inside a
+radius derived from `confinement_density`; `confinement_k` sets how steep the
+wall is. With `confinement_per_chain: true`, each replicate chain gets its own
+sphere so replicates stay spatially separate. With `pbc: true` the periodic box
+provides crowding instead and no confining force is needed.
+
+**SMC loop bonds (dynamic).** Not part of the force builder: each captured
+cohesin in the current LEF frame adds a temporary harmonic bond between its two
+anchored monomers, with rest length `smc_bond_dist` and stiffness from
+`smc_bond_wiggle`. These bonds are rebuilt per restart chunk and switched on/off
+per frame to reproduce loop extrusion, pulling distal monomers together into
+loops.
+
+**Relaxation schedule.** On the first chunk the simulation energy-minimizes the
+initial conformation, optionally runs `initial_relaxation_steps` of bare-polymer
+dynamics (no SMC bonds) to shake out the artificial start, then optionally runs
+`pre_recording_steps` with SMC bonds active so loops equilibrate before the
+first block is recorded.
 
 ## `contacts` Section
 
@@ -726,6 +809,118 @@ Absolute outputs:
 
 For replicate-chain configs, keep replication flags consistent across 1D
 features, 3D E-P pair attraction, and contact-map windows.
+
+## Mapping Simulation Time to Real Time
+
+The pipeline runs in **reduced (dimensionless) units**, not physical seconds.
+One monomer is one length unit (`conlen` = 1 nm internally), energies are in
+`kT`, and the OpenMM-facing numbers (`integrator` `timestep` in femtoseconds,
+`collision_rate` in inverse picoseconds, `mass` in amu) are internal bookkeeping
+that make the integrator stable. They are **not** a physical clock. With the
+default `variableLangevin` integrator the timestep is also adaptive, so the
+`t=…ps` value OpenMM reports accumulates unevenly and has no biological meaning.
+Real-world time enters only through an **external calibration**, described below.
+
+### The Two Clocks
+
+The pipeline has two coupled clocks:
+
+| Clock | Unit | Set by |
+| --- | --- | --- |
+| 1D | one **tick** (lattice update) | `lef.trajectory_length` ticks recorded |
+| 3D | one **MD step**, grouped into **blocks** | `polymer.md_steps_per_block` steps per block |
+
+They are locked together: one recorded LEF frame = **one tick = one block =
+`md_steps_per_block` MD steps**. Calibrating either clock to seconds calibrates
+the trajectory; the cleanest entry point is the 1D tick.
+
+### 1D Tick to Seconds (cohesin-speed calibration)
+
+Per tick, every cohesin leg that is not held at a CTCF site advances **exactly
+one lattice site** (`plugins/lef_dynamics.py`, `target = leg.pos + side`), so a
+two-sided loop grows by up to two sites per tick. This fixes the cohesin
+extrusion velocity at **1 site / leg / tick**, which is the conversion handle.
+
+Pick two modeling constants:
+
+* `bp_per_site` — genomic length of one lattice site / monomer (a modeling
+  choice, e.g. one site = one kilobase);
+* `v_cohesin` — real cohesin extrusion speed per leg (literature values are
+  roughly 0.5–1 kb/s in vivo, up to ~1–2 kb/s in vitro).
+
+Then, because one leg moves `bp_per_site` of DNA per tick:
+
+```text
+t_tick = bp_per_site / v_cohesin          # seconds per tick
+```
+
+### MD Step to Seconds
+
+Two routes, depending on how much rigor is needed.
+
+**(a) Lock to the 1D clock (simplest).** Since one block equals one tick by
+construction, just inherit `t_tick`:
+
+```text
+t_block   = t_tick
+t_md_step = t_tick / md_steps_per_block
+```
+
+This defines MD-step time *through* cohesin speed and needs no extra physics. It
+is the right choice when the polymer relaxation between cohesin moves is treated
+as "fast enough" rather than independently timed.
+
+**(b) Independent diffusion calibration.** Time the 3D dynamics from monomer
+mobility instead. Map a monomer to a physical size `L_real` (from `bp_per_site`
+and the chromatin packing density), measure the simulated monomer diffusion
+coefficient `D_sim` (in `conlen^2` per simulated time), and match it to a
+measured chromatin diffusion coefficient `D_real` (e.g. in µm^2/s):
+
+```text
+t_real / t_sim = (D_sim * L_real^2) / (D_real * L_sim^2)
+```
+
+This route generally does **not** agree with route (a) or with the femtosecond
+`timestep` label; the labels are arbitrary and only the calibrated ratio is
+physical. Use it when absolute 3D kinetics matter.
+
+**Worked MSD calibration (this setup).** For the polychrom force/integrator
+settings used by the gene-aware configs (`error_tol: 0.01`, `collision_rate: 1`,
+`density: 0.2`), the Hansen-lab MSD calibration (Yang & Hansen 2024) gives
+`t_md_step ≈ 0.0063 s` and one monomer ≈ 27 nm at one site = one kilobase. Their
+total cohesin extrusion speed is 125 bp/s. Because both legs advance one site
+(1 kb) per tick, the loop grows 2 kb/tick, so a self-consistent calibration is:
+
+```text
+t_tick             = 2000 bp / 125 bp/s          = 16 s
+md_steps_per_block = t_tick / t_md_step          = 16 / 0.0063 ≈ 2540
+```
+
+i.e. setting `md_steps_per_block: 2540` makes the 3D MD physical time per block
+(route b) equal the 1D cohesin clock per tick (route a) at **1 tick = 16 s**.
+With these numbers a paused-RNAPII pause of `1/pause_release_prob` ticks and an
+elongation rate of `elongation_step_prob` kb per 16 s convert straight to
+minutes and kb/min (see `scripts/nascent_rna_abundance.py`, which derives
+`tick_seconds` from `md_steps_per_block`).
+
+### Putting It Together
+
+Using the cohesin-speed calibration (route a), the recorded trajectory spans:
+
+```text
+t_tick             = bp_per_site / v_cohesin
+simulated_time     = trajectory_length * t_tick
+t_per_saved_frame  = save_every_blocks * t_tick
+t_md_step          = t_tick / md_steps_per_block
+```
+
+`warmup_steps`, `initial_relaxation_steps`, and `pre_recording_steps` happen
+before recording and do not count toward `simulated_time`.
+
+**Caveat.** Do not read real time off the integrator. The femtosecond timestep
+and the OpenMM `t=…ps` readout are internal MD units; with a variable timestep
+they are not even uniform. Biological time comes only from the calibrations
+above.
 
 ## Common Feature Switches
 

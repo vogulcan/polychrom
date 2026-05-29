@@ -112,8 +112,10 @@ def derive_annotations(
             "position": tss, "type": "promoter", "label": f"P{gene_id}",
             "direction": int(g.direction),
         })
-        if getattr(g, "enhancer_pos", None) is not None:
-            enhancer_pos = int(g.enhancer_pos)
+        # A gene may integrate several enhancers (shadow / super-enhancer): emit
+        # one enhancer glyph per unique position and one E-P arc per enhancer.
+        for enhancer_pos in getattr(g, "enhancers", ()):
+            enhancer_pos = int(enhancer_pos)
             if enhancer_pos not in enhancer_ids:
                 enhancer_ids[enhancer_pos] = len(enhancer_ids)
                 elements.append({
@@ -125,6 +127,7 @@ def derive_annotations(
             eps.append({
                 "e": enhancer_pos,
                 "p": tss,
+                "geneId": gene_id,
                 "label": f"E{enhancer_id}-P{gene_id}",
                 "genomic": abs(tss - enhancer_pos),
             })

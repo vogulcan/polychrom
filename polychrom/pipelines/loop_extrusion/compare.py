@@ -55,7 +55,7 @@ class RunData:
     genes_ds: Optional[np.ndarray]
     gene_tss: List[int]
     gene_tes: List[int]
-    gene_enhancers: List[Optional[int]]
+    gene_enhancers: List[List[int]]
     chain_length: int
     num_chains: int
     boundaries: List[int]
@@ -81,16 +81,23 @@ def _gene_coordinates(genes: Any) -> Tuple[List[int], List[int], List[Tuple[int,
     return tss, tes, bodies
 
 
-def _gene_enhancers(genes: Any) -> List[Optional[int]]:
+def _gene_enhancers(genes: Any) -> List[List[int]]:
+    """Per-gene list of enhancer positions (a gene may have several)."""
     if genes is None:
         return []
-    out: List[Optional[int]] = []
+    out: List[List[int]] = []
     for g in genes:
         try:
-            enhancer = g["enhancer_pos"]
+            raw = g["enhancers"]
         except (KeyError, ValueError, TypeError):
-            enhancer = None
-        out.append(None if enhancer is None else int(enhancer))
+            raw = None
+        if raw is None:
+            try:
+                ep = g["enhancer_pos"]
+            except (KeyError, ValueError, TypeError):
+                ep = None
+            raw = [] if ep is None else [ep]
+        out.append([int(e) for e in raw])
     return out
 
 
@@ -224,7 +231,7 @@ def _mean_values(vals: List[float]) -> float:
 
 
 def _fountain_stats(m: np.ndarray, gene_tss: List[int], gene_tes: List[int],
-                    gene_enhancers: List[Optional[int]], *,
+                    gene_enhancers: List[List[int]], *,
                     is_oe: bool, window: int = 80, inner: int = 5) -> Dict[str, Any]:
     """Gene-centered two-sided row/column arm enrichment.
 
@@ -282,9 +289,10 @@ def _fountain_stats(m: np.ndarray, gene_tss: List[int], gene_tes: List[int],
     mean_bg = _mean_values(bg_vals)
     mean_arm = 0.5 * (mean_left + mean_right)
     enh_vals: List[float] = []
-    for tss, enhancer in zip(gene_tss, gene_enhancers):
-        if enhancer is not None and 0 <= int(tss) < n and 0 <= int(enhancer) < n:
-            enh_vals.append(float(0.5 * (m[int(tss), int(enhancer)] + m[int(enhancer), int(tss)])))
+    for tss, enhancers in zip(gene_tss, gene_enhancers):
+        for enhancer in enhancers:
+            if 0 <= int(tss) < n and 0 <= int(enhancer) < n:
+                enh_vals.append(float(0.5 * (m[int(tss), int(enhancer)] + m[int(enhancer), int(tss)])))
 
     return {
         "n_genes": len(per_gene),
