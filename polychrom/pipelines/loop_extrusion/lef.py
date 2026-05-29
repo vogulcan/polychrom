@@ -11,6 +11,7 @@ import numpy as np
 from .config import LEFConfig, resolve_plugin
 from .plugins.lef_dynamics import Cohesin
 from .plugins.rnapii import compute_ep_contacts
+from .progress import ProgressMeter, log
 
 
 def initial_state(cfg: LEFConfig, args: dict, load_fn) -> tuple[np.ndarray, List[Cohesin]]:
@@ -105,7 +106,16 @@ def run(cfg: LEFConfig) -> Path:
     occupied, cohesins = initial_state(cfg, args, load_fn)
     rnapiis: list = []
 
-    for _ in range(max(0, int(cfg.warmup_steps))):
+    log.info(
+        "[lef] 1D dynamics: N=%d sites, %d LEFs, rnapii=%s, lesions=%s | "
+        "warmup=%d steps, trajectory=%d steps",
+        cfg.num_sites, cfg.num_lefs, rnapii_enabled, lesion_enabled,
+        max(0, int(cfg.warmup_steps)), cfg.trajectory_length,
+    )
+
+    warmup_steps = max(0, int(cfg.warmup_steps))
+    warmup_meter = ProgressMeter(warmup_steps, "lef:warmup")
+    for _ in range(warmup_steps):
         _advance_one_step(
             rnapii_enabled=rnapii_enabled,
             rnapiis=rnapiis,
@@ -121,6 +131,9 @@ def run(cfg: LEFConfig) -> Path:
             release_fn=release_fn,
             lesion_update_fn=lesion_update_fn,
         )
+        warmup_meter.update()
+    if warmup_steps:
+        warmup_meter.done()
 
     out_path = Path(cfg.output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,6 +179,7 @@ def run(cfg: LEFConfig) -> Path:
                 fillvalue=-1,
             )
 
+        rec_meter = ProgressMeter(traj_len, "lef:record")
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             if end == start:
                 continue
@@ -218,12 +232,16 @@ def run(cfg: LEFConfig) -> Path:
                     for j, site in enumerate(sorted(args["lesions"])[:lesion_max]):
                         lbuf[i, j] = site
 
+                rec_meter.update(start + i + 1)
+
             dset[start:end] = buffer
             if dset_rnapii is not None:
                 dset_rnapii[start:end] = rbuf
                 dset_states[start:end] = sbuf
             if dset_lesions is not None:
                 dset_lesions[start:end] = lbuf
+
+        rec_meter.done()
 
         fh.attrs["N"] = cfg.num_sites
         fh.attrs["LEFNum"] = n_lefs

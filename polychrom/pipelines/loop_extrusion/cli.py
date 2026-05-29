@@ -13,6 +13,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -78,6 +79,14 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="polychrom-loopext",
         description="Modular loop-extrusion pipeline (LEF + polymer + contacts).",
     )
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="only warnings/errors (default is verbose progress + ETA)",
+    )
+    verbosity.add_argument(
+        "--debug", action="store_true", help="extra debug-level logging",
+    )
     sub = parser.add_subparsers(dest="stage", required=True)
     for name in ("lef", "viewer", "polymer", "contacts", "qc", "all"):
         p = sub.add_parser(name, help=f"run the {name} stage")
@@ -110,6 +119,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # High verbosity by default: surface per-stage progress/ETA and the
+    # Simulation.do_block throughput lines (logging.info). --quiet drops to
+    # warnings; --debug adds debug detail.
+    level = logging.WARNING if args.quiet else (logging.DEBUG if args.debug else logging.INFO)
+    logging.basicConfig(level=level, format="%(message)s", force=True)
+
     if args.stage == "compare":
         if args.folder_b is not None and args.folders is not None:
             parser.error("Use either --folder-b or --folders, not both")

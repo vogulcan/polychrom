@@ -10,6 +10,7 @@ import numpy as np
 
 from ...hdf5_format import list_URIs
 from .config import ContactsConfig, LEFConfig, resolve_plugin
+from .progress import log
 
 
 def _save(array: np.ndarray, path: str) -> Path:
@@ -55,8 +56,14 @@ def run(cfg: ContactsConfig, lef_cfg: Optional[LEFConfig] = None) -> dict[str, P
     if not uris:
         raise FileNotFoundError(f"No trajectory blocks found under {cfg.trajectory_folder}")
 
+    log.info(
+        "[contacts] sampling %d trajectory blocks, map_size=%d, %d processes "
+        "(per-block progress below)",
+        len(uris), cfg.map_size, cfg.num_processes,
+    )
     sampler = resolve_plugin(cfg.plugins.sampler)
     raw = sampler(uris, cfg=cfg, **cfg.plugins.sampler.kwargs)
+    log.info("[contacts] contact map sampled; computing O/E + visualisation")
 
     outputs: dict[str, Path] = {"raw": _save(raw, cfg.raw_output_path)}
 

@@ -7,15 +7,40 @@ already populated with ``N``, ``LIFETIME``, ``LIFETIME_STALLED``,
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from ..config import LEFConfig
 from .rnapii import build_genes
 from .lesions import seed_periodic_lesions
 
+# Boundary strength is either a single value applied to every anchor, or a
+# per-anchor mapping {position: strength} keyed by the chain-relative site.
+BoundaryStrength = Union[float, Mapping[Any, float]]
+
 
 def _empty_ctcf() -> Dict[int, Dict[int, float]]:
     return {-1: {}, 1: {}}
+
+
+def _strength_at(
+    boundary_strength: BoundaryStrength,
+    position: int,
+    default: float,
+) -> float:
+    """Resolve the capture strength for one anchor.
+
+    ``boundary_strength`` may be a scalar (same value for every anchor) or a
+    mapping keyed by chain-relative position. Positions absent from the mapping
+    fall back to ``default``. YAML may parse int keys as strings, so both forms
+    are accepted.
+    """
+    if isinstance(boundary_strength, Mapping):
+        if position in boundary_strength:
+            return float(boundary_strength[position])
+        if str(position) in boundary_strength:
+            return float(boundary_strength[str(position)])
+        return float(default)
+    return float(boundary_strength)
 
 
 def _base_args(cfg: LEFConfig) -> Dict[str, Any]:
@@ -61,11 +86,19 @@ def _apply_convergent_tads(
     cfg: LEFConfig,
     *,
     tad_positions: Iterable[int],
-    boundary_strength: float,
+    boundary_strength: BoundaryStrength,
     release_prob: float,
     include_chromosome_ends: bool,
+    default_boundary_strength: float = 0.5,
 ) -> None:
-    """Place inward-facing CTCF barriers at each TAD interval edge."""
+    """Place inward-facing CTCF barriers at each TAD interval edge.
+
+    ``boundary_strength`` is resolved per anchor: pass a scalar for a uniform
+    barrier, or a ``{position: strength}`` mapping (keyed by the chain-relative
+    TAD boundary position) to tune each anchor individually. The left-facing
+    anchor of an interval is keyed by its ``start`` boundary, the right-facing
+    anchor (sitting at ``end - 1``) by its ``end`` boundary.
+    """
     inner = [int(pos) for pos in tad_positions]
     boundaries = [0, *inner, cfg.chain_length]
     for chain_idx in range(cfg.num_chains):
@@ -74,10 +107,12 @@ def _apply_convergent_tads(
             left_site = chain_offset + start
             right_site = chain_offset + end - 1
             if include_chromosome_ends or start != 0:
-                args["ctcfCapture"][-1][left_site] = float(boundary_strength)
+                args["ctcfCapture"][-1][left_site] = _strength_at(
+                    boundary_strength, start, default_boundary_strength)
                 args["ctcfRelease"][-1][left_site] = float(release_prob)
             if include_chromosome_ends or end != cfg.chain_length:
-                args["ctcfCapture"][1][right_site] = float(boundary_strength)
+                args["ctcfCapture"][1][right_site] = _strength_at(
+                    boundary_strength, end, default_boundary_strength)
                 args["ctcfRelease"][1][right_site] = float(release_prob)
 
 
@@ -140,9 +175,10 @@ def convergent_tad_topology(
     cfg: LEFConfig,
     *,
     tad_positions: Iterable[int] = (),
-    boundary_strength: float = 0.5,
+    boundary_strength: BoundaryStrength = 0.5,
     release_prob: float = 0.0,
     include_chromosome_ends: bool = True,
+    default_boundary_strength: float = 0.5,
 ) -> Dict[str, Any]:
     """TAD layout with directional, inward-facing CTCF barriers.
 
@@ -150,6 +186,10 @@ def convergent_tad_topology(
     and the right edge captures the right-moving leg. With ``release_prob=0``,
     captured legs remain at CTCF until cohesin unloads, matching the NRMCB
     supplementary-box assumption.
+
+    ``boundary_strength`` accepts a scalar (uniform) or a ``{position: strength}``
+    mapping to set each TAD boundary individually; positions missing from the
+    mapping use ``default_boundary_strength``.
     """
     args = _base_args(cfg)
     _apply_convergent_tads(
@@ -159,6 +199,7 @@ def convergent_tad_topology(
         boundary_strength=boundary_strength,
         release_prob=release_prob,
         include_chromosome_ends=include_chromosome_ends,
+        default_boundary_strength=default_boundary_strength,
     )
     return args
 
@@ -271,9 +312,10 @@ def gene_aware_convergent_tad_topology(
     cfg: LEFConfig,
     *,
     tad_positions: Iterable[int] = (),
-    boundary_strength: float = 0.5,
+    boundary_strength: BoundaryStrength = 0.5,
     release_prob: float = 0.0,
     include_chromosome_ends: bool = True,
+    default_boundary_strength: float = 0.5,
     genes: Optional[List[dict]] = None,
     rnapii_stride: int = 1,
     rnapii_stall_prob: float = 0.4,
@@ -304,6 +346,7 @@ def gene_aware_convergent_tad_topology(
         boundary_strength=boundary_strength,
         release_prob=release_prob,
         include_chromosome_ends=include_chromosome_ends,
+        default_boundary_strength=default_boundary_strength,
     )
 
     gene_specs = _expand_genes_across_chains(
@@ -369,7 +412,8 @@ def ep_pair_topology(
     ep_distance: int = 400,
     pair_spacing: int = 10_000,
     first_pair_offset: Optional[int] = None,
-    boundary_strength: float = 0.5,
+    boundary_strength: BoundaryStrength = 0.5,
+    default_boundary_strength: float = 0.5,
     convergent_orientation: bool = True,
 ) -> Dict[str, Any]:
     """E-P pair layout from the NRMCB supplementary box 1.
@@ -413,15 +457,17 @@ def ep_pair_topology(
         left_ctcf = e - 1
         right_ctcf = p + 1
         if 0 <= left_ctcf:
+            s = _strength_at(boundary_strength, left_ctcf, default_boundary_strength)
             if convergent_orientation:
-                args["ctcfCapture"][-1][left_ctcf] = boundary_strength   # stalls left-moving (-1) leg
+                args["ctcfCapture"][-1][left_ctcf] = s   # stalls left-moving (-1) leg
             else:
-                args["ctcfCapture"][1][left_ctcf] = boundary_strength
+                args["ctcfCapture"][1][left_ctcf] = s
         if right_ctcf < cfg_N:
+            s = _strength_at(boundary_strength, right_ctcf, default_boundary_strength)
             if convergent_orientation:
-                args["ctcfCapture"][1][right_ctcf] = boundary_strength   # stalls right-moving (+1) leg
+                args["ctcfCapture"][1][right_ctcf] = s   # stalls right-moving (+1) leg
             else:
-                args["ctcfCapture"][-1][right_ctcf] = boundary_strength
+                args["ctcfCapture"][-1][right_ctcf] = s
 
     args["ep_pairs"] = ep_pairs
     args["sticky_particles"] = sticky

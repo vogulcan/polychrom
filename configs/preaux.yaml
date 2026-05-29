@@ -1,11 +1,12 @@
 # Pre-auxin -- regular (dense) transcription, HIGH CTCF enrichment (0.7).
 # Auxin family models a Pol II degron: pre = Pol II present, post = depleted.
-# Dense transcription (10 genes, 2 per TAD) so Pol II strongly diverts cohesin
-# from CTCF anchors -> pre-auxin TADs are softened despite high CTCF.
+# Shared 10 Mb / 17-TAD E-P topology (1 gene per TAD); Pol II present (max_rnapii
+# 256) strongly diverts cohesin from CTCF anchors -> pre-auxin TADs softened
+# despite high CTCF.
 lef:
-  chain_length: 800
+  chain_length: 10000
   num_chains: 1
-  separation: 100
+  separation: 240
   lifetime: 150
   lifetime_stalled: 150
   warmup_steps: 10000
@@ -15,8 +16,30 @@ lef:
   max_rnapii: 256
 
   topology_kwargs:
-    tad_positions: [160, 320, 480, 640]
-    boundary_strength: 0.7        # HIGH CTCF enrichment
+    tad_positions: [400, 900, 1500, 2200, 3000, 3400, 3900, 4500, 5200, 6000, 6400, 6900, 7500, 8200, 9000, 9500]
+    # Per-anchor CTCF strength (HIGH enrichment), keyed by chain-relative
+    # boundary position (0 + chain end + each tad_positions value). Tune any
+    # anchor on its own; positions left out fall back to default_boundary_strength.
+    boundary_strength:
+      0:     0.7
+      400:   0.7
+      900:   0.7
+      1500:  0.7
+      2200:  0.7
+      3000:  0.7
+      3400:  0.7
+      3900:  0.7
+      4500:  0.7
+      5200:  0.7
+      6000:  0.7
+      6400:  0.7
+      6900:  0.7
+      7500:  0.7
+      8200:  0.7
+      9000:  0.7
+      9500:  0.7
+      10000: 0.7
+    default_boundary_strength: 0.7
     release_prob: 0.0
     include_chromosome_ends: true
     rnapii_stall_prob: 0.20
@@ -37,16 +60,23 @@ lef:
     lesion_block_prob: 0.95
     lesion_max: 64
     genes:
-      - {tss: 30,  tes: 70,  load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 100, tes: 140, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 190, tes: 230, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 260, tes: 300, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 350, tes: 390, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 420, tes: 460, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 510, tes: 550, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 580, tes: 620, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 670, tes: 710, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
-      - {tss: 740, tes: 780, load_prob: 0.06, requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.1, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 140, tes: 260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 80, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 575, tes: 725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 1110, tes: 1290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 1745, tes: 1955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 1640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 2480, tes: 2720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 2360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 3140, tes: 3260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3080, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 3575, tes: 3725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 3500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4110, tes: 4290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 4745, tes: 4955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 4640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 5480, tes: 5720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 5360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 6140, tes: 6260, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 6080, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 6575, tes: 6725, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 6500, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 7110, tes: 7290, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 7020, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 7745, tes: 7955, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 7640, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 8480, tes: 8720, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 8360, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 9175, tes: 9325, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 9100, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
+      - {tss: 9675, tes: 9825, load_prob: 0.05, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 9600, initiation_prob: 0.5, pause_release_prob: 0.05, elongation_step_prob: 0.2, pause_offset: 1, termination_prob: 0.08}
 
   plugins:
     topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
@@ -62,9 +92,9 @@ lef:
 viewer:
   max_frames: 10000
   bridge_cost: 1.0
-  insulation_score_window: 50
+  insulation_score_window: 150
   site_start: 0
-  site_end: 800
+  site_end: 10000
 
 polymer:
   platform: cuda
@@ -79,8 +109,8 @@ polymer:
   md_steps_per_block: 1270
   save_every_blocks: 10
   restart_every_blocks: 200
-  initial_relaxation_steps: 500000
-  pre_recording_steps: 100000
+  initial_relaxation_steps: 1000000
+  pre_recording_steps: 300000
   smc_bond_wiggle: 0.1
   smc_bond_dist: 1.0
   max_data_length: 100
@@ -98,7 +128,24 @@ polymer:
         attraction_radius: 2.0
         restrict_nonbonded_to_chains: true
         replicate_ep_pairs_across_chains: true
-        ep_pairs: []
+        ep_pairs:
+          - [80, 140]
+          - [500, 575]
+          - [1020, 1110]
+          - [1640, 1745]
+          - [2360, 2480]
+          - [3080, 3140]
+          - [3500, 3575]
+          - [4020, 4110]
+          - [4640, 4745]
+          - [5360, 5480]
+          - [6080, 6140]
+          - [6500, 6575]
+          - [7020, 7110]
+          - [7640, 7745]
+          - [8360, 8480]
+          - [9100, 9175]
+          - [9600, 9675]
         selective_attraction_energy: 0.0
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0
@@ -111,9 +158,9 @@ polymer:
 contacts:
   replicate_map_starts_across_chains: true
   map_starts: [0]
-  map_size: 800
+  map_size: 10000
   cutoff: 2.0
-  num_processes: 36
+  num_processes: 12
   verbose: true
   plugins:
     sampler:

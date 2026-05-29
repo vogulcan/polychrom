@@ -719,6 +719,45 @@ def test_gene_aware_topology_can_replicate_genes_across_chains():
     ]
 
 
+def test_convergent_tad_boundary_strength_per_anchor():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    bs = {0: 0.1, 160: 0.2, 320: 0.3, 480: 0.4, 640: 0.5, 800: 0.6}
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tad_positions=[160, 320, 480, 640],
+        boundary_strength=bs,
+        include_chromosome_ends=True,
+    )
+    # Left-facing anchor keyed by interval start position.
+    assert args["ctcfCapture"][-1] == {0: 0.1, 160: 0.2, 320: 0.3, 480: 0.4, 640: 0.5}
+    # Right-facing anchor sits at end - 1 but takes the end boundary's strength.
+    assert args["ctcfCapture"][1] == {159: 0.2, 319: 0.3, 479: 0.4, 639: 0.5, 799: 0.6}
+
+
+def test_convergent_tad_boundary_strength_default_fallback():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tad_positions=[160, 320],
+        boundary_strength={160: 0.9},  # only one anchor specified
+        include_chromosome_ends=True,
+        default_boundary_strength=0.05,
+    )
+    assert args["ctcfCapture"][-1] == {0: 0.05, 160: 0.9, 320: 0.05}
+
+
+def test_convergent_tad_boundary_strength_scalar_backward_compat():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tad_positions=[160, 320],
+        boundary_strength=0.7,
+        include_chromosome_ends=True,
+    )
+    assert set(args["ctcfCapture"][-1].values()) == {0.7}
+    assert set(args["ctcfCapture"][1].values()) == {0.7}
+
+
 def test_contacts_can_replicate_map_starts_across_chains():
     contacts_cfg = ContactsConfig(
         map_starts=[0],

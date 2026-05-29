@@ -21,6 +21,7 @@ from ...hdf5_format import HDF5Reporter
 from ...simulation import Simulation
 from .config import PolymerConfig, resolve_plugin
 from .plugins.rnapii import STATE_ELONGATING
+from .progress import ProgressMeter, log, stepped_run
 
 
 def _gene_bodies(genes_dataset) -> dict:
@@ -258,6 +259,16 @@ def run(cfg: PolymerConfig) -> Path:
         milker = BondUpdater(lef_file["positions"])
         sticky: "StickyUpdater | None" = None
 
+        log.info(
+            "[polymer] 3D MD: N=%d monomers, %d chains | %d frames = %d inits x %d "
+            "blocks, %d MD steps/block | relax=%d, burn-in=%d steps | %s/%s",
+            n_sites, num_chains, n_frames, sim_inits_total,
+            cfg.restart_every_blocks, cfg.md_steps_per_block,
+            cfg.initial_relaxation_steps, cfg.pre_recording_steps,
+            cfg.platform, cfg.precision,
+        )
+        block_meter = ProgressMeter(n_frames, "polymer:record")
+
         for iteration in range(sim_inits_total):
             sim_kwargs = dict(
                 platform=cfg.platform,
@@ -298,8 +309,12 @@ def run(cfg: PolymerConfig) -> Path:
             if iteration == 0 and cfg.initial_relaxation_steps > 0:
                 # Paper-style: relax bare polymer (no cohesin bonds) before
                 # inserting the first set of SMC bonds.
+                log.info("[polymer] minimizing bare polymer energy...")
                 sim.local_energy_minimization()
-                sim.integrator.step(cfg.initial_relaxation_steps)
+                log.info("[polymer] relaxing bare polymer: %d steps",
+                         cfg.initial_relaxation_steps)
+                stepped_run(sim.integrator.step, cfg.initial_relaxation_steps,
+                            "polymer:relax")
 
             k_bond = sim.kbondScalingFactor / (cfg.smc_bond_wiggle ** 2)
             bond_dist = cfg.smc_bond_dist * sim.length_scale
@@ -334,13 +349,17 @@ def run(cfg: PolymerConfig) -> Path:
 
             if iteration == 0 and cfg.pre_recording_steps > 0:
                 # Run with cohesin bonds but skip block-level recording.
-                sim.integrator.step(cfg.pre_recording_steps)
+                log.info("[polymer] burn-in with SMC bonds: %d steps",
+                         cfg.pre_recording_steps)
+                stepped_run(sim.integrator.step, cfg.pre_recording_steps,
+                            "polymer:burn-in")
 
             for i in range(cfg.restart_every_blocks):
                 if i % cfg.save_every_blocks == (cfg.save_every_blocks - 1):
                     sim.do_block(steps=cfg.md_steps_per_block)
                 else:
                     sim.integrator.step(cfg.md_steps_per_block)
+                block_meter.update(iteration * cfg.restart_every_blocks + i + 1)
                 if i < cfg.restart_every_blocks - 1:
                     milker.step(sim.context)
                     if sticky is not None:
@@ -351,6 +370,7 @@ def run(cfg: PolymerConfig) -> Path:
             reporter.blocks_only = True
             time.sleep(0.2)
 
+        block_meter.done()
         reporter.dump_data()
         return out_folder
     finally:
