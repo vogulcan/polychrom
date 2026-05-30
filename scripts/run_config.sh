@@ -1,5 +1,5 @@
 
-for config in config4.yaml config1.yaml config2.yaml config3.yaml; do
+for config in config1.yaml config2.yaml; do
   run_name=$(basename "${config}" .yaml)
   output_path="runs/${run_name}"
   mkdir -p "${output_path}"
