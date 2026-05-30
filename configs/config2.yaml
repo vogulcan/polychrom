@@ -181,7 +181,7 @@ polymer:
       kwargs:
         bond_length: 1.0
         bond_wiggle: 0.1
-        angle_k: null
+        angle_k: 1.0
         repulsion_energy: 50.0
         repulsion_radius: 1.05
         attraction_energy: 0.0
