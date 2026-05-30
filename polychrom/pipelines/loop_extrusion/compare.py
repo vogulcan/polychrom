@@ -36,7 +36,7 @@ from .qc import (
     cohesin_at_lesion_flanks, cohesin_classification, cohesin_occupancy,
     corner_dot_intensities, insulation_boundary_strength, insulation_profile,
     lesion_metrics, loop_length_stats, observed_over_expected, pileup,
-    ps_curve, rescaled_tad_pileup, rnapii_metrics, sanity_1d,
+    ps_curve, ps_curve_1d, rescaled_tad_pileup, rnapii_metrics, sanity_1d,
     stripe_enrichment, tad_strength, tad_strength_from_pileup,
 )
 from .plugins.sampling import iterative_correction
@@ -195,6 +195,14 @@ def _collect_1d(r: RunData) -> Dict[str, Any]:
         "boundary_crossing_stripes": boundary_crossing_stripes(r.positions, r.boundaries),
         "asymmetry_index": asymmetry_index(r.positions),
         "cohesin_at_ctcf_anchor_sum": float(sum(occ[s] for s in anch if s < len(occ))),
+    }
+    ps1d = ps_curve_1d(r.positions, r.chain_length, r.num_chains)
+    out["ps_1d"] = {
+        "ps_at": {
+            str(s): float(ps1d[s])
+            for s in (5, 10, 20, 50, 100, 150, 200, 300, 500)
+            if s < len(ps1d) and np.isfinite(ps1d[s])
+        }
     }
     if r.gene_bodies:
         out["cohesin_at_gene_bodies_sum"] = float(sum(occ[a:b + 1].sum() for a, b in r.gene_bodies))
@@ -410,13 +418,16 @@ def _plot_loop_length(a: Dict, b: Dict, la: str, lb: str, out: Path) -> None:
     fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
 
 
-def _plot_ps(a: np.ndarray, b: np.ndarray, la: str, lb: str, out: Path) -> None:
+def _plot_ps(a: np.ndarray, b: np.ndarray, la: str, lb: str, out: Path,
+             title: str = "P(s)") -> None:
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    s = np.arange(1, len(a))
+    n = min(len(a), len(b))
+    a, b = a[:n], b[:n]
+    s = np.arange(1, n)
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     ax[0].loglog(s, a[1:], label=la); ax[0].loglog(s, b[1:], label=lb)
-    ax[0].set_xlabel("s (kb)"); ax[0].set_ylabel("P(s)"); ax[0].set_title("P(s)"); ax[0].legend()
+    ax[0].set_xlabel("s (kb)"); ax[0].set_ylabel("P(s)"); ax[0].set_title(title); ax[0].legend()
     fold = b[1:] / np.where(a[1:] > 0, a[1:], np.nan)
     ax[1].semilogx(s, fold); ax[1].axhline(1, color="k", ls="--")
     ax[1].set_xlabel("s (kb)"); ax[1].set_ylabel(f"{lb}/{la}")
@@ -651,13 +662,18 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
     # ---- 1D plots
     _plot_loop_length(metrics[label_a]["1d"], metrics[label_b]["1d"],
                       label_a, label_b, plots / f"{plot_prefix}loop_length_compare.png")
+    _plot_ps(ps_curve_1d(a.positions, a.chain_length, a.num_chains),
+             ps_curve_1d(b.positions, b.chain_length, b.num_chains),
+             label_a, label_b, plots / f"{plot_prefix}Ps_1d_compare.png",
+             title="P(s) — 1D bridge contacts")
 
     # ---- 3D plots (need both)
     if a.cmap_obs is not None and b.cmap_obs is not None:
         _plot_contact_maps(a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe,
                            a.boundaries, label_a, label_b, plots / f"{plot_prefix}contact_map_compare.png")
         _plot_ps(ps_curve(a.cmap_obs), ps_curve(b.cmap_obs),
-                 label_a, label_b, plots / f"{plot_prefix}Ps_compare.png")
+                 label_a, label_b, plots / f"{plot_prefix}Ps_3d_compare.png",
+                 title="P(s) — 3D contact map")
         _plot_insulation(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
                          plots / f"{plot_prefix}insulation_compare.png")
         # Flyamer rescaled-TAD pile-up
@@ -956,9 +972,27 @@ def _write_report(m: Dict[str, Any], path: Path, la: str, lb: str,
     lines.append(row("boundary-crossing stripe share", f"{a_cross_stripe:.1f}%",
                      f"{b_cross_stripe:.1f}%",
                      f"{f.get('boundary_crossing_stripe_share') or float('nan'):.2f}"))
+    if "ps_1d" in a1 and "ps_1d" in b1:
+        lines.append("\n## P(s) — 1D bridge contacts")
+        lines.append(f"| s (kb) | {la} | {lb} | {lb}/{la} |")
+        lines.append("|---|---|---|---|")
+        pa, pb = a1["ps_1d"]["ps_at"], b1["ps_1d"]["ps_at"]
+        for s in sorted(set(pa) & set(pb), key=int):
+            va, vb = pa[s], pb[s]
+            fold = vb / va if va else float("nan")
+            lines.append(f"| {s} | {va:.2e} | {vb:.2e} | {fold:.2f} |")
     if "3d" in m[la] and "3d" in m[lb]:
         a3 = m[la]["3d"]; b3 = m[lb]["3d"]
         lines.append("\n## 3D")
+        if "ps_at" in a3 and "ps_at" in b3:
+            lines.append("\n### P(s) — 3D contact map")
+            lines.append(f"| s (kb) | {la} | {lb} | {lb}/{la} |")
+            lines.append("|---|---|---|---|")
+            pa, pb = a3["ps_at"], b3["ps_at"]
+            for s in sorted(set(pa) & set(pb), key=int):
+                va, vb = pa[s], pb[s]
+                fold = vb / va if va else float("nan")
+                lines.append(f"| {s} | {va:.2e} | {vb:.2e} | {fold:.2f} |")
         if "tad_pileup_obs" in a3:
             lines.append(row("TAD strength, Flyamer (OBS)",
                              f"{a3['tad_pileup_obs']['strength']:.2f}",
@@ -1042,8 +1076,8 @@ def _write_report(m: Dict[str, Any], path: Path, la: str, lb: str,
                     f"{fmt_fold(right_fold)} |"
                 )
     lines.append("\n## Plots")
-    for fn in ("loop_length_compare.png", "Ps_compare.png", "insulation_compare.png",
-               "contact_map_compare.png", "tad_pileup_compare.png",
+    for fn in ("loop_length_compare.png", "Ps_1d_compare.png", "Ps_3d_compare.png",
+               "insulation_compare.png", "contact_map_compare.png", "tad_pileup_compare.png",
                "anchor_pileups_compare_obs.png", "anchor_pileups_compare_oe.png"):
         prefixed = f"{plot_prefix}{fn}"
         if (path.parent / "plots" / prefixed).exists():

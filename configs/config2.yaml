@@ -45,7 +45,7 @@
 # scripts/nascent_rna_abundance.py after the `lef` stage.
 lef:
   chain_length: 4000           # 4 Mb at 1 kb/site
-  num_chains: 3
+  num_chains: 1
   separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
   lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
   lifetime_stalled: 82

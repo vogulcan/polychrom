@@ -292,11 +292,37 @@ def cohesin_at_lesion_flanks(positions: np.ndarray, lesions: np.ndarray, n_sites
 # ---------------------------------------------------------------------------
 
 def ps_curve(m: np.ndarray) -> np.ndarray:
-    """Contact probability vs genomic separation."""
+    """Contact probability vs genomic separation, from a 3D contact map."""
     N = m.shape[0]
     out = np.full(N, np.nan)
     for s in range(1, N):
         out[s] = np.diagonal(m, s).mean()
+    return out
+
+
+def ps_curve_1d(positions: np.ndarray, chain_length: int, num_chains: int) -> np.ndarray:
+    """Bridge-contact probability vs genomic separation, from 1D LEF positions.
+
+    Each cohesin bridges its two legs ``(l, r)``; a captured loop of span
+    ``s = |r - l|`` is one contact at separation ``s``. Normalised by the number
+    of frames and same-chain site pairs at separation ``s`` so the curve is
+    shape-comparable to the 3D contact-map P(s).
+    """
+    counts = np.zeros(chain_length, dtype=float)
+    n_frames = max(positions.shape[0], 1)
+    for fr in positions:
+        for l, r in fr:
+            li, ri = int(l), int(r)
+            if li < 0 or ri < 0:
+                continue
+            s = abs(ri - li)
+            if 0 < s < chain_length:
+                counts[s] += 1
+    out = np.full(chain_length, np.nan)
+    for s in range(1, chain_length):
+        pairs = num_chains * (chain_length - s)
+        if pairs > 0:
+            out[s] = counts[s] / (n_frames * pairs)
     return out
 
 
@@ -489,7 +515,8 @@ def _plot_loop_hist(stats: Dict, out: Path) -> None:
     plt.close(fig)
 
 
-def _plot_ps(ps: np.ndarray, out: Path) -> None:
+def _plot_ps(ps: np.ndarray, out: Path,
+             title: str = "Contact probability vs genomic separation") -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -498,7 +525,7 @@ def _plot_ps(ps: np.ndarray, out: Path) -> None:
     ax.loglog(s, ps[1:])
     ax.set_xlabel("s (kb)")
     ax.set_ylabel("P(s)")
-    ax.set_title("Contact probability vs genomic separation")
+    ax.set_title(title)
     fig.tight_layout()
     fig.savefig(out, dpi=120)
     plt.close(fig)
@@ -672,6 +699,15 @@ def run(cfg) -> Path:
     metrics["boundary_crossing"] = boundary_crossing(positions, boundaries)
     metrics["asymmetry_index"] = asymmetry_index(positions)
 
+    ps1d = ps_curve_1d(positions, chain_length, num_chains)
+    metrics["ps_1d"] = {
+        "ps_at": {
+            str(s): float(ps1d[s])
+            for s in (5, 10, 20, 50, 100, 150, 200, 300, 500)
+            if s < len(ps1d) and np.isfinite(ps1d[s])
+        }
+    }
+
     occ = cohesin_occupancy(positions, chain_length * num_chains)
     metrics["cohesin_at_ctcf_anchor_sum"] = float(sum(occ[s] for s in anch if s < len(occ)))
     if gene_bodies:
@@ -688,8 +724,9 @@ def run(cfg) -> Path:
         metrics["lesions"]["cohesin_flank_enrichment"] = cohesin_at_lesion_flanks(
             positions, lesions, chain_length * num_chains)
 
-    # plots: 1D loop length
+    # plots: 1D loop length + 1D bridge-contact P(s)
     _plot_loop_hist(metrics["loop_length"], paths.plots_dir / "loop_length.png")
+    _plot_ps(ps1d, paths.plots_dir / "Ps_1d.png", title="P(s) — 1D bridge contacts")
 
     # 3D (if available)
     cmap_path = Path(getattr(cfg.contacts, "raw_output_path", ""))
@@ -727,7 +764,7 @@ def run(cfg) -> Path:
             },
         }
         metrics["3d"] = m3d
-        _plot_ps(ps, paths.plots_dir / "Ps.png")
+        _plot_ps(ps, paths.plots_dir / "Ps_3d.png", title="P(s) — 3D contact map")
         _plot_insulation(m, windows, boundaries, paths.plots_dir / "insulation_windows.png")
         _plot_contact_map(m, boundaries, paths.plots_dir / "contact_map.png")
         # Pile-ups (centered on each anchor type) -- obs and O/E, both ICE-balanced.
@@ -786,6 +823,10 @@ def _write_report(metrics: Dict[str, Any], paths: QCPaths) -> None:
     bc = metrics["boundary_crossing"]
     lines.append("\n## Boundary crossing")
     lines.append(f"- mean: {bc['mean']:.3f}")
+    if "ps_1d" in metrics:
+        lines.append("\n## P(s) — 1D bridge contacts")
+        lines.append("- P(s) at separations: " + "  ".join(
+            f"s={k}:{v:.2e}" for k, v in metrics["ps_1d"]["ps_at"].items()))
     if "rnapii" in metrics:
         r = metrics["rnapii"]
         lines.append("\n## RNAPII")
@@ -805,15 +846,16 @@ def _write_report(metrics: Dict[str, Any], paths: QCPaths) -> None:
         lines.append(f"- contact-map shape: {m3['shape']}")
         lines.append(f"- TAD strength (intra/inter): {m3['tad_strength']['intra_over_inter']:.2f}")
         lines.append(f"- corner-dot intensities per TAD: {[round(x, 1) for x in m3['corner_dot_intensities']]}")
-        lines.append("- P(s) at separations: " + "  ".join(f"s={k}:{v:.2e}" for k, v in m3["ps_at"].items()))
+        lines.append("- P(s) (3D contact map) at separations: " + "  ".join(f"s={k}:{v:.2e}" for k, v in m3["ps_at"].items()))
         lines.append("- insulation_boundary_strength (lower = stronger; per window):")
         for w, d in m3["insulation_boundary_strength"].items():
             lines.append(f"  - w={w}: {d}")
     lines.append("\n## Plots")
     lines.append("- [loop_length.png](plots/loop_length.png)")
+    lines.append("- [Ps_1d.png](plots/Ps_1d.png) -- 1D bridge-contact P(s)")
     if "3d" in metrics:
         lines.append("- All 3D metrics use the **ICE-balanced** contact map.")
-        lines.append("- [Ps.png](plots/Ps.png)")
+        lines.append("- [Ps_3d.png](plots/Ps_3d.png) -- 3D contact-map P(s)")
         lines.append("- [insulation_windows.png](plots/insulation_windows.png)")
         lines.append("- [contact_map.png](plots/contact_map.png)")
         lines.append("- [pileups_obs.png](plots/pileups_obs.png) -- observed pile-ups around CTCF / TSS / TES / lesions")
