@@ -229,6 +229,7 @@ def gene_aware_topology(
     rnapii_elongating_block_prob: Optional[float] = None,
     rnapii_terminating_block_prob: Optional[float] = None,
     rnapii_block_prob: float = 1.0,
+    lifetime_rnapii_stalled: Optional[int] = None,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
     replicate_genes_across_chains: bool = False,
@@ -296,6 +297,11 @@ def gene_aware_topology(
         else float(rnapii_terminating_block_prob)
     )
     args["rnapii_block_prob"] = fallback_block_prob
+    args["LIFETIME_RNAPII_STALLED"] = (
+        int(args["LIFETIME_STALLED"])
+        if lifetime_rnapii_stalled is None
+        else int(lifetime_rnapii_stalled)
+    )
     args["ep_contact_tolerance"] = int(ep_contact_tolerance)
     _set_loading_sites(
         args, gene_objs,
@@ -338,6 +344,7 @@ def gene_aware_convergent_tad_topology(
     rnapii_elongating_block_prob: Optional[float] = None,
     rnapii_terminating_block_prob: Optional[float] = None,
     rnapii_block_prob: float = 1.0,
+    lifetime_rnapii_stalled: Optional[int] = None,
     rnapii_default_load_prob: float = 0.02,
     ep_contact_tolerance: int = 2,
     replicate_genes_across_chains: bool = False,
@@ -397,6 +404,11 @@ def gene_aware_convergent_tad_topology(
         else float(rnapii_terminating_block_prob)
     )
     args["rnapii_block_prob"] = fallback_block_prob
+    args["LIFETIME_RNAPII_STALLED"] = (
+        int(args["LIFETIME_STALLED"])
+        if lifetime_rnapii_stalled is None
+        else int(lifetime_rnapii_stalled)
+    )
     args["ep_contact_tolerance"] = int(ep_contact_tolerance)
     _set_loading_sites(
         args, gene_objs,

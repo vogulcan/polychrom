@@ -53,23 +53,29 @@ lef:
   trajectory_length: 100000
   chunk_size: 50
   seed: 1001
-  max_rnapii: 128              # transcription OFF (RNAPII plugins nulled below)
+  max_rnapii: 0                # transcription OFF (RNAPII plugins nulled below)
 
   topology_kwargs:
     # Inner TAD boundaries (chain-relative). Boundaries at 0 + these + 4000.
     tad_positions: [350, 950, 1250, 2050, 2500, 3300]
     # Per-anchor CTCF strength keyed by chain-relative boundary position.
-    # Strong insulating boundaries (0.9); 1250 is a weaker sub-TAD boundary.
+    # Transcription-OFF config: boundary capture set SLIGHTLY LOWER than config1
+    # (0.50 vs 0.60). Counterintuitively the weaker per-encounter CTCF occupancy
+    # still yields MORE-defined TADs / higher corner dots here, because with no
+    # RNAPII barrier cohesin is no longer diverted or evicted at gene bodies and
+    # instead accumulates at CTCF (Fursova&Larson 2024: txn loss -> longer
+    # CTCF-anchored loops + sharper TADs; Kim 2026). The lower b also leaks more
+    # boundary-crossing stripes, per CONFIG_EXPLANATIONS point 3.
     boundary_strength:
-      0:    0.6
-      350:  0.6
-      950:  0.6
-      1250: 0.6
-      2050: 0.6
-      2500: 0.6
-      3300: 0.6
-      4000: 0.6
-    default_boundary_strength: 0.6
+      0:    0.50
+      350:  0.50
+      950:  0.50
+      1250: 0.50
+      2050: 0.50
+      2500: 0.50
+      3300: 0.50
+      4000: 0.50
+    default_boundary_strength: 0.50
     release_prob: 0.0
     include_chromosome_ends: true
     rnapii_stall_prob: 0.20
@@ -90,10 +96,17 @@ lef:
     rnapii_terminating_block_prob: 0.95
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
-    targeted_load_prob: 0.12
-    loading_window: 2
+    # Facilitated cohesin loading at enhancers is the mechanism of extrusion
+    # FOUNTAINS (Galitsyna et al. 2026, Nat Commun s41467-026-69105-9). Their
+    # polymer parameter sweep (Fig 5d,e) shows ~10-fold loading enrichment at a
+    # narrow 1-kb enhancer site best fits the measured fountain intensity, while
+    # 50-100x is "too strong". With 9 enhancers over 4000 sites the per-site
+    # enrichment is E = 1 + p*N/(n_enh*(1-p)); p=0.02 -> ~10x (best fit).
+    # Fountains form at ENHANCERS, not promoters (Fig 2d, 3b) -> target_tss false.
+    targeted_load_prob: 0.02     # was 0.12 (~62x enrichment, too strong -> fountains too frequent)
+    loading_window: 1            # 1-kb enhancer loading site = 1 monomer (Fig 5a)
     target_enhancers: true
-    target_tss: true
+    target_tss: false
     lesion_prob: 0.0
     # One gene per TAD spanning BOTH Kim et al. 2026 (NSMB) regulatory classes
     # and a realistic gene-length spread (20-240 kb; human median ~24 kb, with a

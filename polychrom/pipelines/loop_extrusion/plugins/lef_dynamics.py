@@ -80,8 +80,20 @@ def _valid_step(pos: int, target: int, args: Dict) -> bool:
 
 
 def unload_prob(cohesin: Cohesin, args: Dict) -> float:
-    """Per-step unload probability. Stalled (not at CTCF) cohesins die faster."""
-    if cohesin.any("stalled") and not cohesin.any("CTCF"):
+    """Per-step unload probability. Stalled (not at CTCF) cohesins die faster.
+
+    A cohesin stalled or pushed *by RNAPII* (``rnapii_stalled`` flag) unloads at
+    the transcription-specific rate ``LIFETIME_RNAPII_STALLED`` -- modelling
+    active Pol II eviction of cohesin (Busslinger 2017; Jeppsson 2022). This is
+    kept separate from generic obstacle stalling (cohesin-cohesin traffic, lesion)
+    so depleting RNAPII restores full residence ONLY where transcription was the
+    cause, instead of globally shrinking loops.
+    """
+    if cohesin.any("CTCF"):
+        return 1.0 / args["LIFETIME"]
+    if cohesin.any("rnapii_stalled"):
+        return 1.0 / args.get("LIFETIME_RNAPII_STALLED", args["LIFETIME_STALLED"])
+    if cohesin.any("stalled"):
         return 1.0 / args["LIFETIME_STALLED"]
     return 1.0 / args["LIFETIME"]
 
@@ -298,12 +310,14 @@ def translocate_with_rnapii(
             target = leg.pos + side
             if not _valid_step(leg.pos, target, args):
                 leg.attrs["stalled"] = True
+                leg.attrs["rnapii_stalled"] = False
                 continue
 
             # A lesion blocks an incoming cohesin leg (per-tick stall prob).
             # The other leg is unaffected, so the cohesin extrudes asymmetrically.
             if lesions and target in lesions and np.random.random() < lesion_block_prob:
                 leg.attrs["stalled"] = True
+                leg.attrs["rnapii_stalled"] = False
                 continue
 
             cell = occupied[target]
@@ -312,6 +326,7 @@ def translocate_with_rnapii(
                 leg_by_pos.pop(leg.pos, None)
                 leg.attrs["stalled"] = False
                 leg.attrs["pushed"] = False
+                leg.attrs["rnapii_stalled"] = False
                 occupied[leg.pos] = FREE
                 occupied[target] = COHESIN
                 leg.pos = target
@@ -320,6 +335,7 @@ def translocate_with_rnapii(
 
             if cell == COHESIN:
                 leg.attrs["stalled"] = True
+                leg.attrs["rnapii_stalled"] = False
                 continue
 
             # cell == RNAPII_CELL
@@ -331,6 +347,7 @@ def translocate_with_rnapii(
                 # handles the cleanup and won't overwrite COHESIN).
                 leg_by_pos.pop(leg.pos, None)
                 leg.attrs["stalled"] = False
+                leg.attrs["rnapii_stalled"] = False
                 occupied[leg.pos] = FREE
                 occupied[target] = COHESIN  # bypass: cohesin takes the slot
                 leg.pos = target
@@ -342,12 +359,16 @@ def translocate_with_rnapii(
                 # in place because occupied[r.pos] is no longer RNAPII_CELL.
                 leg_by_pos.pop(leg.pos, None)
                 leg.attrs["stalled"] = False
+                leg.attrs["rnapii_stalled"] = False
                 occupied[leg.pos] = FREE
                 occupied[target] = COHESIN
                 leg.pos = target
                 leg_by_pos[target] = leg
             else:
+                # Blocked by RNAPII: stalled by transcription -> eligible for
+                # Pol II-specific fast eviction (LIFETIME_RNAPII_STALLED).
                 leg.attrs["stalled"] = True
+                leg.attrs["rnapii_stalled"] = True
 
 
 def color(cohesins: List[Cohesin], args: Dict) -> np.ndarray:

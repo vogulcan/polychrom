@@ -366,6 +366,9 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
         if leg is not None:
             leg.pos = behind
             leg.attrs["pushed"] = True
+            # Pushed by elongating Pol II == transcription collision -> mark for
+            # Pol II-specific fast eviction (Busslinger 2017; Jeppsson 2022).
+            leg.attrs["rnapii_stalled"] = True
             args["cohesin_leg_by_pos"][behind] = leg
         r.pos = target
         rnapii_by_pos[target] = r

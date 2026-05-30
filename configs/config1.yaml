@@ -59,24 +59,50 @@ lef:
     # Inner TAD boundaries (chain-relative). Boundaries at 0 + these + 4000.
     tad_positions: [350, 950, 1250, 2050, 2500, 3300]
     # Per-anchor CTCF strength keyed by chain-relative boundary position.
-    # Strong insulating boundaries (0.9); 1250 is a weaker sub-TAD boundary.
+    # HIGHER than config2 (0.60 vs 0.50), per CONFIG_EXPLANATIONS: the
+    # transcription-ON config holds nominally stronger CTCF occupancy, yet config2
+    # still wins TAD definition / corner dots because removing the RNAPII barrier
+    # lets cohesin reach and anchor at CTCF instead of turning over at gene bodies.
     boundary_strength:
-      0:    0.6
-      350:  0.6
-      950:  0.6
-      1250: 0.6
-      2050: 0.6
-      2500: 0.6
-      3300: 0.6
-      4000: 0.6
-    default_boundary_strength: 0.6
+      0:    0.60
+      350:  0.60
+      950:  0.60
+      1250: 0.60
+      2050: 0.60
+      2500: 0.60
+      3300: 0.60
+      4000: 0.60
+    default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
-    rnapii_stall_prob: 0.20
-    rnapii_push_prob: 0.50          # elongating PolII relocalizes co-directional
+    # Transcription-coupled cohesin EVICTION: a cohesin stalled/pushed by Pol II
+    # unloads with residence 24 ticks (~6 min) instead of the 82-tick (~22 min)
+    # CTCF/free residence -- active Pol II displaces cohesin from gene bodies
+    # (Busslinger 2017; Jeppsson 2022; Banigan&Mirny 2022 moving barrier). This
+    # is the mechanism that makes RNAPII a SEMI-PERMEABLE barrier: in config1
+    # cohesin caught at active genes turns over faster and less often reaches CTCF,
+    # so turning transcription OFF (config2) restores full residence -> cohesin
+    # accumulates at boundaries -> sharper TADs / corner dots (CONFIG_EXPLANATIONS).
+    #
+    # These four RNAPII knobs were chosen by a biology-gated grid search
+    # (scripts/grid_search_phenotype.py, staged 20k->50k/3-seed) that MAXIMIZES the
+    # config2/config1 CONFIG_EXPLANATIONS phenotype (corner-dot + TAD-strength fold)
+    # SUBJECT TO biological correctness gates: Kim 2026 directionality (signed
+    # gene-body leg displacement > 0), E-P->output coupling (Spearman rho > 0),
+    # mammalian elongation 1.5-2.5 kb/min, and a sane Pol II state mix. Winner:
+    # lt=24, stall=0.20, block=0.90, push=0.40, headon=0.02 -> corner 4.9x, all five
+    # phenotype folds correct, displacement +0.023 (Kim MATCH), rho 0.85, elong 1.87.
+    # NOTE the trade-off the search makes explicit: stronger eviction / lower push
+    # reaches ~7-10x corner but FLIPS displacement negative (Kim "loops follow txn"
+    # LOST); this point is the best phenotype that still keeps every biology gate.
+    lifetime_rnapii_stalled: 24
+    rnapii_stall_prob: 0.20         # Pol II is a semi-permeable barrier (mostly push)
+    rnapii_push_prob: 0.40          # elongating PolII relocalizes co-directional
                                     # cohesin downstream (Banigan&Mirny 2022 moving
-                                    # barrier; Kim 2026 cohesin follows txn dir)
-    rnapii_headon_push_prob: 0.05
+                                    # barrier; Kim 2026 cohesin-mediated loops FOLLOW
+                                    # txn direction -- reproduced here as a +signed
+                                    # cohesin-leg displacement in active gene bodies).
+    rnapii_headon_push_prob: 0.02
     # Tei 2026 gatekeeper arm: a cohesin leg within 1 site of a paused Pol II
     # restrains (slows 3.3x) its pause release. Opposes the E-P activation arm;
     # on cohesin loss the restraint is relieved, compensating for lost
@@ -86,19 +112,21 @@ lef:
     rnapii_pause_restraint_window: 1
     rnapii_poised_block_prob: 0.5
     rnapii_paused_block_prob: 0.95
-    rnapii_elongating_block_prob: 0.8
+    rnapii_elongating_block_prob: 0.90
     rnapii_terminating_block_prob: 0.95
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
-    targeted_load_prob: 0.12         # NIPBL-mediated cohesin loading at active
-                                    # enhancers/TSS. Calibrated to Kim 2026 Fig 2c:
-                                    # of CTCF-free cohesin-loading sites, 445/(445+
-                                    # 2640) ~= 14% coincide with a TSS. 1D sims give
-                                    # realized targeted-load fraction ~= 0.026 (bg) +
-                                    # 0.95*p, so p=0.12 -> ~14% loads at TSS/enhancers.
-    loading_window: 2
+    # Facilitated cohesin loading at enhancers is the mechanism of extrusion
+    # FOUNTAINS (Galitsyna et al. 2026, Nat Commun s41467-026-69105-9). Their
+    # polymer parameter sweep (Fig 5d,e) shows ~10-fold loading enrichment at a
+    # narrow 1-kb enhancer site best fits the measured fountain intensity, while
+    # 50-100x is "too strong". With 9 enhancers over 4000 sites the per-site
+    # enrichment is E = 1 + p*N/(n_enh*(1-p)); p=0.02 -> ~10x (best fit).
+    # Fountains form at ENHANCERS, not promoters (Fig 2d, 3b) -> target_tss false.
+    targeted_load_prob: 0.02     # was 0.12 (~62x enrichment, too strong -> fountains too frequent)
+    loading_window: 1            # 1-kb enhancer loading site = 1 monomer (Fig 5a)
     target_enhancers: true
-    target_tss: true
+    target_tss: false
     lesion_prob: 0.0
     # One gene per TAD spanning BOTH Kim et al. 2026 (NSMB) regulatory classes
     # and a realistic gene-length spread (20-240 kb; human median ~24 kb, with a

@@ -32,6 +32,79 @@ from polychrom.pipelines.loop_extrusion.config import load_config  # noqa: E402
 ELONGATING = 2
 
 
+def measure_coupling(h5_path: Path, cfg) -> dict:
+    """Importable core for the two Kim-2026 gates used by the grid search.
+
+    Returns ``{"displacement", "rho", "median_down_up", "n_active"}``:
+      * ``displacement`` -- mean signed cohesin-leg step (sites/tick) inside ACTIVE
+        gene bodies in the transcription-direction frame. >0 == "cohesin loops
+        follow transcription" (Kim 2026 Fig 2). Same computation as ``main``.
+      * ``rho`` -- Spearman corr(E-P contact freq, nascent Pol II); >0 == cohesin
+        loop drives output.
+    NaN for a quantity when it cannot be computed (no active genes / <3 E-P genes).
+    """
+    with h5py.File(h5_path, "r") as fh:
+        pos = fh["positions"][:]                  # (T, L, 2)
+        rpos = fh["rnapii_positions"][:]          # (T, R, 2): [site, gene_id]
+        rstate = fh["rnapii_states"][:].astype(int)
+        genes = fh["genes"][:]
+        tol = int(cfg.lef.topology_kwargs.get("ep_contact_tolerance", 2))
+    T = pos.shape[0]
+    chain_length = int(cfg.lef.chain_length)
+    num_chains = int(cfg.lef.num_chains)
+    base_specs = cfg.lef.topology_kwargs.get("genes", [])
+    n_base = max(1, len(genes) // num_chains)
+
+    nascent_list, contact_list = [], []
+    for row in genes:
+        g = int(row["gene_id"]); tss = int(row["tss"])
+        sel = (rpos[:, :, 1] == g) & (rpos[:, :, 0] >= 0) & (rstate == ELONGATING)
+        nascent_list.append(float(sel.sum(1).mean()))
+        spec = base_specs[g % n_base] if base_specs else {}
+        offset = (g // n_base) * chain_length
+        raw_enh = spec.get("enhancers") or (
+            [spec["enhancer_pos"]] if spec.get("enhancer_pos") is not None else [])
+        if not raw_enh:
+            continue
+        ehits = 0
+        for t in range(T):
+            ivals = [(min(a, b), max(a, b)) for a, b in pos[t] if a >= 0]
+            for e in raw_enh:
+                ea = int(e) + offset
+                lo = min(tss, ea) + tol; hi = max(tss, ea) - tol
+                if any(L <= lo and R >= hi for L, R in ivals):
+                    ehits += 1; break
+        contact_list.append((ehits / T, nascent_list[-1]))
+
+    active = {int(r["gene_id"]): nas for r, nas in zip(genes, nascent_list) if nas >= 1.0}
+    gdir = {int(r["gene_id"]): int(r["direction"]) for r in genes}
+    gbody = {int(r["gene_id"]): tuple(sorted((int(r["tss"]), int(r["tes"]))))
+             for r in genes}
+    signed = []
+    for j in range(pos.shape[1]):
+        for side in (0, 1):
+            s = pos[:, j, side]
+            for t in range(T - 1):
+                a, b = s[t], s[t + 1]
+                if a < 0 or b < 0 or abs(int(b) - int(a)) > 1:
+                    continue
+                for g in active:
+                    lo, hi = gbody[g]
+                    if lo <= a <= hi:
+                        signed.append((int(b) - int(a)) * gdir[g]); break
+
+    rho = float("nan")
+    if len(contact_list) >= 3:
+        c = np.array(contact_list)
+        rc = np.argsort(np.argsort(c[:, 0])); rn = np.argsort(np.argsort(c[:, 1]))
+        rho = float(np.corrcoef(rc, rn)[0, 1])
+    return {
+        "displacement": float(np.mean(signed)) if signed else float("nan"),
+        "rho": rho,
+        "n_active": len(active),
+    }
+
+
 def _resolve_h5(arg: str | None) -> Path:
     if arg is None:
         return Path("trajectory/LEFPositions.h5")
