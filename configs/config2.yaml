@@ -45,7 +45,7 @@
 # scripts/nascent_rna_abundance.py after the `lef` stage.
 lef:
   chain_length: 4000           # 4 Mb at 1 kb/site
-  num_chains: 1
+  num_chains: 3
   separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
   lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
   lifetime_stalled: 82
@@ -58,24 +58,16 @@ lef:
   topology_kwargs:
     # Inner TAD boundaries (chain-relative). Boundaries at 0 + these + 4000.
     tad_positions: [350, 950, 1250, 2050, 2500, 3300]
-    # Per-anchor CTCF strength keyed by chain-relative boundary position.
-    # Transcription-OFF config: boundary capture set SLIGHTLY LOWER than config1
-    # (0.50 vs 0.60). Counterintuitively the weaker per-encounter CTCF occupancy
-    # still yields MORE-defined TADs / higher corner dots here, because with no
-    # RNAPII barrier cohesin is no longer diverted or evicted at gene bodies and
-    # instead accumulates at CTCF (Fursova&Larson 2024: txn loss -> longer
-    # CTCF-anchored loops + sharper TADs; Kim 2026). The lower b also leaks more
-    # boundary-crossing stripes, per CONFIG_EXPLANATIONS point 3.
     boundary_strength:
-      0:    0.50
-      350:  0.50
-      950:  0.50
-      1250: 0.50
-      2050: 0.50
-      2500: 0.50
-      3300: 0.50
-      4000: 0.50
-    default_boundary_strength: 0.50
+      0:    0.60
+      350:  0.60
+      950:  0.60
+      1250: 0.60
+      2050: 0.60
+      2500: 0.60
+      3300: 0.60
+      4000: 0.60
+    default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
     rnapii_stall_prob: 0.20

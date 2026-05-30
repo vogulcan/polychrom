@@ -45,7 +45,7 @@
 # scripts/nascent_rna_abundance.py after the `lef` stage.
 lef:
   chain_length: 4000           # 4 Mb at 1 kb/site
-  num_chains: 1
+  num_chains: 3
   separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
   lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
   lifetime_stalled: 82
@@ -58,11 +58,6 @@ lef:
   topology_kwargs:
     # Inner TAD boundaries (chain-relative). Boundaries at 0 + these + 4000.
     tad_positions: [350, 950, 1250, 2050, 2500, 3300]
-    # Per-anchor CTCF strength keyed by chain-relative boundary position.
-    # HIGHER than config2 (0.60 vs 0.50), per CONFIG_EXPLANATIONS: the
-    # transcription-ON config holds nominally stronger CTCF occupancy, yet config2
-    # still wins TAD definition / corner dots because removing the RNAPII barrier
-    # lets cohesin reach and anchor at CTCF instead of turning over at gene bodies.
     boundary_strength:
       0:    0.60
       350:  0.60

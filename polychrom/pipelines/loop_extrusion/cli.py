@@ -113,6 +113,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="comparison label; only valid with one comparison")
     cmp_p.add_argument("--labels", type=str, nargs="+", default=None,
                        help="comparison labels, one per comparison")
+    cmp_p.add_argument("--cutoffs", type=float, nargs="+", default=None,
+                       help="contact-distance cutoffs (e.g. 2 3 4 5 6); resamples each "
+                            "run's contact map from its trajectory and writes one "
+                            "cutoff_<c>/ subfolder per value")
     return parser
 
 
@@ -154,10 +158,12 @@ def main(argv: list[str] | None = None) -> int:
         labels = args.labels or ([args.label_b] if args.label_b is not None else default_labels)
         if len(cfg_others) == 1:
             out = args.out or Path(f"compare_{label_a}_{labels[0]}")
-            result = compare_stage.run(cfg_a, cfg_others[0], out, label_a, labels[0])
+            result = compare_stage.run(cfg_a, cfg_others[0], out, label_a, labels[0],
+                                       cutoffs=args.cutoffs)
         else:
             out = args.out or Path(f"compare_{label_a}_vs_many")
-            result = compare_stage.run_many(cfg_a, cfg_others, out, label_a, labels)
+            result = compare_stage.run_many(cfg_a, cfg_others, out, label_a, labels,
+                                            cutoffs=args.cutoffs)
         print(f"[compare]  wrote {result}")
         return 0
     cfg = load_config(args.config, output_path=args.output_path)

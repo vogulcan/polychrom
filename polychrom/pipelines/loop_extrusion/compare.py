@@ -21,13 +21,16 @@ run2 run3 ...`` and write pairwise subdirectories plus ``compare_many.*``.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
 
+from ...hdf5_format import list_URIs
+from .config import resolve_plugin
+from .contacts import _effective_map_starts
 from .qc import (
     anchor_set, asymmetry_index, boundary_crossing, boundary_crossing_stripes,
     cohesin_at_lesion_flanks, cohesin_classification, cohesin_occupancy,
@@ -101,7 +104,27 @@ def _gene_enhancers(genes: Any) -> List[List[int]]:
     return out
 
 
-def _load(cfg, label: str) -> RunData:
+def _sample_raw(cfg, cutoff: float) -> np.ndarray:
+    """Re-sample a raw contact map from the run's trajectory at ``cutoff``.
+
+    Mirrors the ``contacts`` stage sampler so per-cutoff comparisons use the
+    same map_starts / sampler plugin the run was configured with.
+    """
+    contacts_cfg = replace(cfg.contacts, cutoff=float(cutoff))
+    contacts_cfg = replace(
+        contacts_cfg, map_starts=_effective_map_starts(contacts_cfg, cfg.lef))
+    uris = list_URIs(str(contacts_cfg.trajectory_folder))
+    if not uris:
+        raise FileNotFoundError(
+            f"No trajectory blocks under {contacts_cfg.trajectory_folder}; "
+            "cutoff resampling needs the polymer trajectory"
+        )
+    sampler = resolve_plugin(contacts_cfg.plugins.sampler)
+    raw = sampler(uris, cfg=contacts_cfg, **contacts_cfg.plugins.sampler.kwargs)
+    return np.asarray(raw, dtype=float)
+
+
+def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
     lef_h5 = Path(cfg.lef.output_path)
     if not lef_h5.exists():
         raise FileNotFoundError(f"[{label}] LEFPositions.h5 not found: {lef_h5}")
@@ -126,17 +149,24 @@ def _load(cfg, label: str) -> RunData:
 
     cmap_obs = None
     cmap_oe = None
-    raw_p = Path(getattr(cfg.contacts, "raw_output_path", ""))
-    if raw_p.exists():
-        raw = np.load(raw_p).astype(float)
+    if cutoff is not None:
+        raw = _sample_raw(cfg, cutoff)
         cmap_obs = np.nan_to_num(
             iterative_correction(raw, ignore_diagonals=2, max_iter=200, tol=1e-5)
         )
-        oe_p = Path(getattr(cfg.contacts, "oe_output_path", ""))
-        if oe_p.exists():
-            cmap_oe = np.nan_to_num(np.load(oe_p).astype(float), nan=1.0)
-        else:
-            cmap_oe = np.nan_to_num(observed_over_expected(cmap_obs), nan=1.0)
+        cmap_oe = np.nan_to_num(observed_over_expected(cmap_obs), nan=1.0)
+    else:
+        raw_p = Path(getattr(cfg.contacts, "raw_output_path", ""))
+        if raw_p.exists():
+            raw = np.load(raw_p).astype(float)
+            cmap_obs = np.nan_to_num(
+                iterative_correction(raw, ignore_diagonals=2, max_iter=200, tol=1e-5)
+            )
+            oe_p = Path(getattr(cfg.contacts, "oe_output_path", ""))
+            if oe_p.exists():
+                cmap_oe = np.nan_to_num(np.load(oe_p).astype(float), nan=1.0)
+            else:
+                cmap_oe = np.nan_to_num(observed_over_expected(cmap_obs), nan=1.0)
 
     return RunData(
         label=label, positions=pos, rnapii_positions=rp, rnapii_states=rs,
@@ -597,19 +627,20 @@ def _fold(a: float, b: float) -> Optional[float]:
 
 def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
               report_name: str = "compare.md", json_name: str = "compare.json",
-              plot_prefix: str = "") -> Dict[str, Any]:
+              plot_prefix: str = "", cutoff: Optional[float] = None) -> Dict[str, Any]:
     out_dir = Path(out_dir)
     plots = out_dir / "plots"
     out_dir.mkdir(parents=True, exist_ok=True)
     plots.mkdir(parents=True, exist_ok=True)
 
-    a = _load(cfg_a, label_a)
-    b = _load(cfg_b, label_b)
+    a = _load(cfg_a, label_a, cutoff=cutoff)
+    b = _load(cfg_b, label_b, cutoff=cutoff)
     if a.boundaries != b.boundaries:
         print(f"WARNING: boundaries differ between {label_a} and {label_b}; comparison uses {label_a}'s.")
 
     metrics: Dict[str, Any] = {
         "labels": {"A": label_a, "B": label_b},
+        "cutoff": cutoff,
         label_a: {"1d": _collect_1d(a)},
         label_b: {"1d": _collect_1d(b)},
     }
@@ -728,8 +759,20 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
     return metrics
 
 
+def _cutoff_dirname(cutoff: float) -> str:
+    c = float(cutoff)
+    return f"cutoff_{int(c)}" if c.is_integer() else f"cutoff_{c}"
+
+
 def run(cfg_a, cfg_b, out_dir: Path,
-        label_a: str = "A", label_b: str = "B") -> Path:
+        label_a: str = "A", label_b: str = "B",
+        cutoffs: Optional[List[float]] = None) -> Path:
+    out_dir = Path(out_dir)
+    if cutoffs:
+        for c in cutoffs:
+            _run_pair(cfg_a, cfg_b, out_dir / _cutoff_dirname(c),
+                      label_a, label_b, cutoff=c)
+        return out_dir
     _run_pair(cfg_a, cfg_b, out_dir, label_a, label_b)
     return out_dir
 
@@ -745,14 +788,26 @@ def _fmt_summary(x: Any, digits: int = 2) -> str:
 
 def run_many(cfg_baseline, cfg_others: List[Any], out_dir: Path,
              baseline_label: str = "baseline",
-             comparison_labels: Optional[List[str]] = None) -> Path:
+             comparison_labels: Optional[List[str]] = None,
+             cutoffs: Optional[List[float]] = None,
+             cutoff: Optional[float] = None) -> Path:
     """Compare many runs against one baseline.
 
     Writes flat files in ``out_dir``:
     * ``compare_<label>.json/md`` -- pairwise details per comparison
     * ``compare_many.json`` -- paths + top-line fold summary
     * ``compare_many.md``   -- compact table linking pairwise reports
+
+    With ``cutoffs`` set, the whole comparison is repeated per contact-distance
+    cutoff (maps resampled from each run's trajectory) into ``cutoff_<c>/``
+    subfolders.
     """
+    out_dir = Path(out_dir)
+    if cutoffs:
+        for c in cutoffs:
+            run_many(cfg_baseline, cfg_others, out_dir / _cutoff_dirname(c),
+                     baseline_label, comparison_labels, cutoff=c)
+        return out_dir
     if not cfg_others:
         raise ValueError("run_many requires at least one comparison config")
     if comparison_labels is None:
@@ -782,6 +837,7 @@ def run_many(cfg_baseline, cfg_others: List[Any], out_dir: Path,
         metrics = _run_pair(
             cfg_baseline, cfg, out_dir, baseline_label, label,
             report_name=report_name, json_name=json_name, plot_prefix=plot_prefix,
+            cutoff=cutoff,
         )
         folds = metrics.get("folds", {})
         baseline_3d = metrics.get(baseline_label, {}).get("3d", {})
