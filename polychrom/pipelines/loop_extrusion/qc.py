@@ -209,6 +209,7 @@ def rnapii_metrics(rnapii_positions: np.ndarray, rnapii_states: np.ndarray,
             "PAUSED": float(100 * ((states == 1) & present).sum() / tot),
             "ELONGATING": float(100 * ((states == 2) & present).sum() / tot),
             "TERMINATING": float(100 * ((states == 3) & present).sum() / tot),
+            "STALLED": float(100 * ((states == 4) & present).sum() / tot),
         }
         sites = rnapii_positions[:, :, 0]
         adv = 0
@@ -779,6 +780,10 @@ def run(cfg) -> Path:
             "ice_balanced": True,
             "tad_strength": tad_strength(m, tads),
             "corner_dot_intensities": corner_dot_intensities(m, tads),
+            # O/E corner dot: distance-normalized CTCF-CTCF loop enrichment, the
+            # proper corner-score analog of the 1D corner_both metric. The raw-obs
+            # corner dot is distance-confounded (far-apart anchors -> low count).
+            "corner_dot_intensities_oe": corner_dot_intensities(oe, tads),
             "ps_at": {str(s): float(ps[s]) for s in (5, 10, 20, 50, 100, 150, 200, 300, 500) if s < len(ps)},
             "insulation_boundary_strength": {
                 str(w): insulation_boundary_strength(insulation_profile(m, w), boundaries, w)

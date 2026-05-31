@@ -151,8 +151,8 @@ const SVGNS = "http://www.w3.org/2000/svg";
 const PALETTE = ["#2563eb","#dc2626","#16a34a","#9333ea","#ea580c","#0891b2",
                  "#c026d3","#65a30d","#d97706","#4f46e5","#e11d48","#059669"];
 const C_PROMOTER = "#16a34a", C_ENH_FILL = "#f59e0b", C_ENH_STROKE = "#d97706", C_CTCF = "#6b7280";
-const RNAPII_COLORS = ["#64748b", "#f59e0b", "#be185d", "#7c3aed"];
-const RNAPII_STATES = ["poised", "paused", "elongating", "terminating"];
+const RNAPII_COLORS = ["#64748b", "#f59e0b", "#be185d", "#7c3aed", "#dc2626"];
+const RNAPII_STATES = ["poised", "paused", "elongating", "terminating", "stalled"];
 const cohColor = id => PALETTE[((id % PALETTE.length) + PALETTE.length) % PALETTE.length];
 
 const N = DATA.latticeSize;

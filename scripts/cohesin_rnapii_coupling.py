@@ -30,6 +30,7 @@ from polychrom.pipelines.loop_extrusion import lef as lef_stage  # noqa: E402
 from polychrom.pipelines.loop_extrusion.config import load_config  # noqa: E402
 
 ELONGATING = 2
+STALLED = 4
 
 
 def measure_coupling(h5_path: Path, cfg) -> dict:
@@ -58,7 +59,8 @@ def measure_coupling(h5_path: Path, cfg) -> dict:
     nascent_list, contact_list = [], []
     for row in genes:
         g = int(row["gene_id"]); tss = int(row["tss"])
-        sel = (rpos[:, :, 1] == g) & (rpos[:, :, 0] >= 0) & (rstate == ELONGATING)
+        sel = ((rpos[:, :, 1] == g) & (rpos[:, :, 0] >= 0)
+               & ((rstate == ELONGATING) | (rstate == STALLED)))
         nascent_list.append(float(sel.sum(1).mean()))
         spec = base_specs[g % n_base] if base_specs else {}
         offset = (g // n_base) * chain_length
@@ -153,13 +155,14 @@ def main(argv: list[str]) -> int:
     print("\n## 1. Cohesin spatial distribution flanking genes (DESCRIPTIVE).")
     print("#   up_occ/down_occ = cohesin leg occupancy just upstream of TSS vs just")
     print("#   downstream of TES. NOTE: dominated by NIPBL loading + E-P anchoring at")
-    print("#   enhancers (Kim 2026 Fig 2d), NOT a clean pushing probe -- when a gene's")
-    print("#   enhancer is upstream, cohesin enriches upstream (ratio<1) by design.")
-    print("#   The clean pushing/directionality test is the leg-displacement metric below.")
-    print("{:>5} {:>4} {:>9} {:>9} {:>11} {:>9}".format(
-        "gene", "dir", "up_occ", "down_occ", "down/up", "nascentE"))
+    print("#   enhancers (Kim 2026 Fig 2d), NOT a clean pushing probe. enh/away resolves")
+    print("#   the enhancer side per gene orientation (>1 => enriched on enhancer side);")
+    print("#   down/up is raw and orientation-blind. The clean pushing/directionality")
+    print("#   test is the leg-displacement metric below.")
+    print("{:>5} {:>4} {:>9} {:>9} {:>11} {:>11} {:>9}".format(
+        "gene", "dir", "up_occ", "down_occ", "down/up", "enh/away", "nascentE"))
 
-    nascent_list, contact_list, ratio_list = [], [], []
+    nascent_list, contact_list, ratio_list, enh_ratio_list = [], [], [], []
     for row in genes:
         g = int(row["gene_id"]); tss = int(row["tss"]); tes = int(row["tes"])
         d = int(row["direction"])
@@ -171,8 +174,9 @@ def main(argv: list[str]) -> int:
         dn_occ = occ[dn_lo:min(N, dn_hi)].mean() if dn_hi > dn_lo else 0.0
         ratio = dn_occ / up_occ if up_occ > 0 else float("nan")
 
-        # nascent (elongating Pol II for this gene, time-mean)
-        sel = (rpos[:, :, 1] == g) & (rpos[:, :, 0] >= 0) & (rstate == ELONGATING)
+        # nascent (engaged Pol II for this gene -- elongating or stalled, time-mean)
+        sel = ((rpos[:, :, 1] == g) & (rpos[:, :, 0] >= 0)
+               & ((rstate == ELONGATING) | (rstate == STALLED)))
         nascent = float(sel.sum(1).mean())
 
         # E-P contact frequency: fraction of ticks a cohesin loop brackets (TSS,enh)
@@ -181,6 +185,19 @@ def main(argv: list[str]) -> int:
         spec = base_specs[g % n_base] if base_specs else {}
         offset = (g // n_base) * chain_length
         raw_enh = spec.get("enhancers") or ([spec["enhancer_pos"]] if spec.get("enhancer_pos") is not None else [])
+
+        # enhancer-side occupancy enrichment (Kim 2026 Fig 2d): cohesin loads/anchors
+        # at the enhancer, which may be up- OR downstream depending on gene orientation.
+        # >1 => cohesin enriched on the enhancer/loading side. NaN for genes w/o enhancer.
+        enh_ratio = float("nan")
+        if raw_enh and up_occ > 0 and dn_occ > 0:
+            enh_mean = np.mean([int(e) + offset for e in raw_enh])
+            enh_is_up = (d * (enh_mean - tss)) < 0          # enhancer behind TSS?
+            toward = up_occ if enh_is_up else dn_occ
+            away = dn_occ if enh_is_up else up_occ
+            enh_ratio = toward / away
+            enh_ratio_list.append(enh_ratio)
+
         contact_freq = float("nan")
         if raw_enh:
             ehits = 0
@@ -201,7 +218,8 @@ def main(argv: list[str]) -> int:
             contact_list.append((g, contact_freq, nascent))
         if ratio == ratio:
             ratio_list.append(ratio)
-        print(f"{g:>5} {d:>+4d} {up_occ:>9.4f} {dn_occ:>9.4f} {ratio:>11.2f} {nascent:>9.3f}")
+        enh_str = f"{enh_ratio:>11.2f}" if enh_ratio == enh_ratio else f"{'--':>11}"
+        print(f"{g:>5} {d:>+4d} {up_occ:>9.4f} {dn_occ:>9.4f} {ratio:>11.2f} {enh_str} {nascent:>9.3f}")
 
     # ---- direct pushing test: signed leg displacement inside ACTIVE gene bodies
     # Per-slot leg identity is stable across ticks, so pos[t+1,j]-pos[t,j] is a
@@ -224,11 +242,12 @@ def main(argv: list[str]) -> int:
                     if lo <= a <= hi:
                         signed.append((int(b) - int(a)) * gdir[g])
                         break
-    if ratio_list:
-        med = float(np.median(ratio_list))
-        print(f"\n# median downstream/upstream cohesin occupancy = {med:.2f} "
-              f"(<1 => cohesin enriched on the enhancer/loading side, "
-              f"per Kim 2026 Fig 2d; this is loading+anchoring, not pushing)")
+    if enh_ratio_list:
+        med = float(np.median(enh_ratio_list))
+        print(f"\n# median enhancer-side/away cohesin occupancy = {med:.2f} "
+              f"(>1 => cohesin enriched on the enhancer/loading side, "
+              f"per Kim 2026 Fig 2d; this is loading+anchoring, not pushing). "
+              f"Enhancer-bearing genes only; side resolved per gene orientation.")
 
     # ---- summary: directional pushing (the clean directionality verdict) -----
     if signed:

@@ -21,6 +21,7 @@ STATE_POISED = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
 STATE_TERMINATING = 3
+STATE_STALLED = 4
 
 
 class Leg:
@@ -237,6 +238,12 @@ def _rnapii_blocks_cohesin(rnapii, args: Dict) -> bool:
             args.get("rnapii_paused_block_prob", args.get("rnapii_block_prob", 1.0))
         )
     elif state == STATE_ELONGATING:
+        prob = float(
+            args.get("rnapii_elongating_block_prob", args.get("rnapii_block_prob", 1.0))
+        )
+    elif state == STATE_STALLED:
+        # Stalled Pol II is physically the same body as elongating, just not
+        # advancing this tick; block cohesin at the elongating rate.
         prob = float(
             args.get("rnapii_elongating_block_prob", args.get("rnapii_block_prob", 1.0))
         )

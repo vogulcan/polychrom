@@ -18,7 +18,7 @@ lef:
     default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
-    lifetime_rnapii_stalled: 24    # ~6.4 min: Pol II evicts cohesin (Busslinger 2017; Jeppsson 2022)
+    lifetime_rnapii_stalled: 82
     rnapii_stall_prob: 0.35        # Pol intrinsically stalls ~1/3 of cohesin hits (pausing on obstacle)
     rnapii_push_prob: 0.50         # co-directional cohesin pushed (Kim 2026: cohesin follows txn; Banigan-Mirny 2022)
     rnapii_headon_push_prob: 0.02  # head-on collision stalls, not reversed (Brandao 2019; replication-txn conflict)
@@ -71,7 +71,7 @@ polymer:
   density: 0.2
   pbc: false
   md_steps_per_block: 2540        # 2540 * 0.0063 s = 16.0 s real time per tick
-  save_every_blocks: 10
+  save_every_blocks: 1
   restart_every_blocks: 200
   initial_relaxation_steps: 500000   # Hansen Suppl: bare-polymer relax to steady state
   pre_recording_steps: 300000
@@ -85,7 +85,7 @@ polymer:
       kwargs:
         bond_length: 1.0
         bond_wiggle: 0.1
-        angle_k: 1.0
+        angle_k: 1.5
         repulsion_energy: 50.0
         repulsion_radius: 1.05
         attraction_energy: 0.0
@@ -95,7 +95,7 @@ polymer:
         ep_pairs:
           - [170, 290]
           - [210, 290]
-        selective_attraction_energy: 0.5
+        selective_attraction_energy: 1.5
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0
         confinement_density: 0.2

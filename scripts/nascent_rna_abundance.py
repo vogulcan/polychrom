@@ -50,9 +50,11 @@ from polychrom.pipelines.loop_extrusion.config import load_config  # noqa: E402
 # for error_tol=0.01, collision_rate=1, density=0.2 (the polychrom setup used
 # throughout this pipeline).
 MD_STEP_SECONDS = 0.0063
-STATE_NAMES = {0: "POISED", 1: "PAUSED", 2: "ELONGATING", 3: "TERMINATING"}
+STATE_NAMES = {0: "POISED", 1: "PAUSED", 2: "ELONGATING", 3: "TERMINATING",
+               4: "STALLED"}
 PAUSED = 1
 ELONGATING = 2
+STALLED = 4
 
 
 def resolve_h5(arg: str | None) -> Path:
@@ -106,10 +108,17 @@ def measure_per_gene(h5_path: Path, cfg) -> Tuple[List[dict], Dict]:
         glen = abs(tes - tss)
         sel = (gid == g) & present
         n_present = int(sel.sum())
-        elong = sel & (states == ELONGATING)
-        nascent = float(elong.sum(axis=1).mean())
+        # Engaged Pol II carries a nascent transcript whether it is advancing
+        # (ELONGATING) or obstacle-blocked (STALLED); both count toward nascent.
+        engaged = sel & ((states == ELONGATING) | (states == STALLED))
+        nascent = float(engaged.sum(axis=1).mean())
         paused = sel & (states == PAUSED)
-        pct_paused = (100.0 * paused.sum() / n_present) if n_present else 0.0
+        # %paused is measured among Pol II in the promoter-proximal kinetic pool,
+        # i.e. excluding obstacle-STALLED ticks -- otherwise long stalls in the
+        # gene body dilute the metric toward 0 (see STATE_STALLED).
+        n_stalled = int((sel & (states == STALLED)).sum())
+        denom = n_present - n_stalled
+        pct_paused = (100.0 * paused.sum() / denom) if denom else 0.0
 
         # Recording columns are the live, compacted RNAPII list, so a column is
         # not a stable Pol II across ticks. Use the per-Pol uid: a completion is

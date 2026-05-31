@@ -20,7 +20,7 @@ import numpy as np
 from ...hdf5_format import HDF5Reporter
 from ...simulation import Simulation
 from .config import PolymerConfig, resolve_plugin
-from .plugins.rnapii import STATE_ELONGATING
+from .plugins.rnapii import STATE_ELONGATING, STATE_STALLED
 from .progress import ProgressMeter, log, stepped_run
 
 
@@ -151,7 +151,7 @@ class StickyUpdater:
             gid = int(pos[k, 1])
             if gid < 0:
                 continue
-            if int(states[k]) == STATE_ELONGATING:
+            if int(states[k]) in (STATE_ELONGATING, STATE_STALLED):
                 active_genes.add(gid)
         out: set = set()
         for gid in active_genes:

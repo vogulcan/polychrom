@@ -371,6 +371,10 @@ def _collect_3d(r: RunData) -> Optional[Dict[str, Any]]:
         "shape": list(m.shape),
         "tad_strength": tad_strength(m, r.tads),
         "corner_dot_intensities": corner_dot_intensities(m, r.tads),
+        # O/E corner dot: distance-normalized CTCF-CTCF loop enrichment (proper
+        # corner-score; the raw-obs corner dot is distance-confounded).
+        "corner_dot_intensities_oe": (
+            corner_dot_intensities(r.cmap_oe, r.tads) if r.cmap_oe is not None else None),
         "ps_at": {str(s): float(ps[s]) for s in (5, 10, 20, 50, 100, 150, 200, 300, 500) if s < len(ps)},
         "insulation_boundary_strength": {
             str(w): insulation_boundary_strength(insulation_profile(m, w), r.boundaries, w)
@@ -737,6 +741,13 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
                 b3["corner_dot_intensities"],
             )
         ]
+        if a3.get("corner_dot_intensities_oe") and b3.get("corner_dot_intensities_oe"):
+            folds["corner_dot_intensities_oe_per_tad"] = [
+                _fold(p, q) for p, q in zip(
+                    a3["corner_dot_intensities_oe"],
+                    b3["corner_dot_intensities_oe"],
+                )
+            ]
         if "stripe_enrichment_per_boundary" in a3 and "stripe_enrichment_per_boundary" in b3:
             folds["stripe_enrichment_per_boundary"] = {}
             for boundary in sorted(set(a3["stripe_enrichment_per_boundary"]) &

@@ -23,9 +23,12 @@ RNAPII state codes (stored in ``RNAPII.attrs["state"]`` and the optional
     1 = PAUSED       (initiated, promoter-proximal pause)
     2 = ELONGATING   (productive elongation)
     3 = TERMINATING  (reached TES, dwelling there before unloading)
+    4 = STALLED      (in the gene body, attempted a step but physically blocked
+                      this tick -- cohesin / traffic / lesion; NOT promoter-
+                      proximal pause and NOT productive elongation)
 
-POISED, PAUSED and TERMINATING Pol II are stationary blocks to cohesin;
-only ELONGATING Pol II can push it (Fursova & Larson 2024, Fig 3a).
+POISED, PAUSED, STALLED and TERMINATING Pol II are stationary blocks to
+cohesin; only ELONGATING Pol II can push it (Fursova & Larson 2024, Fig 3a).
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ STATE_POISED = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
 STATE_TERMINATING = 3
+STATE_STALLED = 4
 
 
 def _chain_length(args: Dict) -> int:
@@ -526,6 +530,13 @@ def stateful_translocate_rnapii(
             r.attrs["state"] = STATE_ELONGATING
             # fall through to elongation step this tick
 
-        # state == STATE_ELONGATING (either entering this tick or carried over)
+        # state == STATE_ELONGATING / STATE_STALLED (entering or carried over).
+        # Rolling the speed dice and failing = slow but productive elongation
+        # (stays ELONGATING). Rolling it and being physically blocked = STALLED
+        # (cohesin / traffic / lesion); this keeps obstacle stalls out of the
+        # elongation metric and out of the %paused denominator downstream.
         if np.random.random() < gene.elongation_step_prob:
-            _try_single_step(r, gene, occupied, args)
+            advanced = _try_single_step(r, gene, occupied, args)
+            r.attrs["state"] = STATE_ELONGATING if advanced else STATE_STALLED
+        else:
+            r.attrs["state"] = STATE_ELONGATING
