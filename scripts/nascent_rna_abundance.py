@@ -133,19 +133,18 @@ def measure_per_gene(h5_path: Path, cfg) -> Tuple[List[dict], Dict]:
         # dropped; the estimate stays unbiased but uses fewer samples than the raw
         # tick count. Filter by gid so each gene reports its own speed, not the
         # lattice-wide mean.
-        adv = eticks = 0
-        for k in range(site_pos.shape[1]):
-            for t in range(1, T):
-                if states[t, k] != ELONGATING or states[t - 1, k] != ELONGATING:
-                    continue
-                if gid[t, k] != g or gid[t - 1, k] != g:
-                    continue
-                if ids[t, k] < 0 or ids[t, k] != ids[t - 1, k]:
-                    continue
-                d = int(site_pos[t, k] - site_pos[t - 1, k])
-                if abs(d) > 1:
-                    continue
-                adv += abs(d); eticks += 1
+        s_cur, s_prev = states[1:], states[:-1]
+        g_cur, g_prev = gid[1:], gid[:-1]
+        i_cur, i_prev = ids[1:], ids[:-1]
+        step = site_pos[1:] - site_pos[:-1]
+        adv_mask = (
+            (s_cur == ELONGATING) & (s_prev == ELONGATING)
+            & (g_cur == g) & (g_prev == g)
+            & (i_cur >= 0) & (i_cur == i_prev)
+            & (np.abs(step) <= 1)
+        )
+        eticks = int(adv_mask.sum())
+        adv = int(np.abs(step)[adv_mask].sum())
         kb_min = (adv / eticks / ts * 60.0) if eticks else float("nan")
 
         gid_rows.append({
