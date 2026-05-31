@@ -1,0 +1,175 @@
+lef:
+  chain_length: 600
+  num_chains: 10
+  separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
+  lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
+  lifetime_stalled: 82
+  warmup_steps: 10000
+  trajectory_length: 10000
+  chunk_size: 50
+  seed: 1001
+  max_rnapii: 16              # transcription ON
+
+  topology_kwargs:
+    tad_positions: [150, 300]
+    boundary_strength:
+      150:    0.60
+      300:  0.60
+    default_boundary_strength: 0.60
+    release_prob: 0.0
+    include_chromosome_ends: true
+    # Transcription-coupled cohesin EVICTION: a cohesin stalled/pushed by Pol II
+    # unloads with residence 24 ticks (~6 min) instead of the 82-tick (~22 min)
+    # CTCF/free residence -- active Pol II displaces cohesin from gene bodies
+    # (Busslinger 2017; Jeppsson 2022; Banigan&Mirny 2022 moving barrier). This
+    # is the mechanism that makes RNAPII a SEMI-PERMEABLE barrier: in config1
+    # cohesin caught at active genes turns over faster and less often reaches CTCF,
+    # so turning transcription OFF (config2) restores full residence -> cohesin
+    # accumulates at boundaries -> sharper TADs / corner dots (CONFIG_EXPLANATIONS).
+    #
+    # These four RNAPII knobs were chosen by a biology-gated grid search
+    # (scripts/grid_search_phenotype.py, staged 20k->50k/3-seed) that MAXIMIZES the
+    # config2/config1 CONFIG_EXPLANATIONS phenotype (corner-dot + TAD-strength fold)
+    # SUBJECT TO biological correctness gates: Kim 2026 directionality (signed
+    # gene-body leg displacement > 0), E-P->output coupling (Spearman rho > 0),
+    # mammalian elongation 1.5-2.5 kb/min, and a sane Pol II state mix. Winner:
+    # lt=24, stall=0.20, block=0.90, push=0.40, headon=0.02 -> corner 4.9x, all five
+    # phenotype folds correct, displacement +0.023 (Kim MATCH), rho 0.85, elong 1.87.
+    # NOTE the trade-off the search makes explicit: stronger eviction / lower push
+    # reaches ~7-10x corner but FLIPS displacement negative (Kim "loops follow txn"
+    # LOST); this point is the best phenotype that still keeps every biology gate.
+    lifetime_rnapii_stalled: 24
+    rnapii_stall_prob: 0.20         # Pol II is a semi-permeable barrier (mostly push)
+    rnapii_push_prob: 0.40          # elongating PolII relocalizes co-directional
+                                    # cohesin downstream (Banigan&Mirny 2022 moving
+                                    # barrier; Kim 2026 cohesin-mediated loops FOLLOW
+                                    # txn direction -- reproduced here as a +signed
+                                    # cohesin-leg displacement in active gene bodies).
+    rnapii_headon_push_prob: 0.02
+    # Tei 2026 gatekeeper arm: a cohesin leg within 1 site of a paused Pol II
+    # restrains (slows 3.3x) its pause release. Opposes the E-P activation arm;
+    # on cohesin loss the restraint is relieved, compensating for lost
+    # recruitment (steady-state paradox; partial upregulation of constitutive
+    # genes per Kim 2026).
+    rnapii_pause_cohesin_restraint: 0.3
+    rnapii_pause_restraint_window: 1
+    rnapii_poised_block_prob: 0.5
+    rnapii_paused_block_prob: 0.95
+    rnapii_elongating_block_prob: 0.90
+    rnapii_terminating_block_prob: 0.95
+    ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
+    # Facilitated cohesin loading at enhancers is the mechanism of extrusion
+    # FOUNTAINS (Galitsyna et al. 2026, Nat Commun s41467-026-69105-9). Their
+    # polymer parameter sweep (Fig 5d,e) shows ~10-fold loading enrichment at a
+    # narrow 1-kb enhancer site best fits the measured fountain intensity, while
+    # 50-100x is "too strong". With 9 enhancers over 4000 sites the per-site
+    # enrichment is E = 1 + p*N/(n_enh*(1-p)); p=0.02 -> ~10x (best fit).
+    # Fountains form at ENHANCERS, not promoters (Fig 2d, 3b) -> target_tss false.
+    targeted_load_prob: 0.02     # was 0.12 (~62x enrichment, too strong -> fountains too frequent)
+    loading_window: 1            # 1-kb enhancer loading site = 1 monomer (Fig 5a)
+    target_enhancers: true
+    target_tss: false
+    lesion_prob: 0.0
+    # One gene per TAD spanning BOTH Kim et al. 2026 (NSMB) regulatory classes
+    # and a realistic gene-length spread (20-240 kb; human median ~24 kb, with a
+    # long developmental-gene tail):
+    #   * LONG-RANGE, cohesin-dependent, cell-type-specific genes (E-P >100 kb):
+    #     require E-P loop contact to fire (requires_enhancer + load_requires_
+    #     enhancer). These are the genes that lose expression on RAD21 depletion.
+    #   * SHORT-RANGE, cohesin-INDEPENDENT, constitutive (housekeeping-like) genes
+    #     (E-P <50 kb): fire regardless of the loop (requires_enhancer: false,
+    #     higher load_prob) -- insensitive to cohesin loss (Kim 2026 short loops).
+    # (enhancer, TSS) sit inside the same TAD, >=~50 kb from any boundary.
+    # Kinetics calibrated to 16 s/tick (see header): elongation 0.6 site/tick
+    # (~2 kb/min realized), pause release 0.045 (~6 min pause), termination 0.15
+    # (~1.8 min TES dwell). load_prob 0.1 (loop-gated genes) / 0.3 (constitutive).
+    genes:
+      - {tss: 160,  tes: 180,  load_prob: 0.3, requires_enhancer: false, load_requires_enhancer: false, enhancer_pos: 90,   initiation_prob: 0.5, pause_release_prob: 0.045, elongation_step_prob: 0.6, pause_offset: 1, termination_prob: 0.15}
+      - {tss: 280,  tes: 220,  load_prob: 0.1, requires_enhancer: true, load_requires_enhancer: true, enhancer_pos: 190,  initiation_prob: 0.5, pause_release_prob: 0.045, elongation_step_prob: 0.6, pause_offset: 1, termination_prob: 0.15}
+
+  plugins:
+    topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load:        polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+
+viewer:
+  max_frames: 1000
+  bridge_cost: 1.0
+  insulation_score_window: 200    # ~ smallest TAD scale
+  site_start: 0
+  site_end: 4000
+
+polymer:
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.01
+  collision_rate: 1.0
+  precision: mixed
+  seed: 2001
+  density: 0.2
+  pbc: false
+  md_steps_per_block: 2540        # 2540 * 0.0063 s = 16.0 s real time per tick
+  save_every_blocks: 10
+  restart_every_blocks: 200
+  initial_relaxation_steps: 500000   # Hansen Suppl: bare-polymer relax to steady state
+  pre_recording_steps: 300000
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 100
+  overwrite: true
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: 1.0
+        repulsion_energy: 50.0
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 2.0
+        restrict_nonbonded_to_chains: true
+        replicate_ep_pairs_across_chains: true
+        ep_pairs:
+          - [190, 220]
+        selective_attraction_energy: 1.0
+        polii_self_affinity: 0.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.2
+        confinement_per_chain: true
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  replicate_map_starts_across_chains: true
+  map_starts: [0]
+  map_size: 4000
+  cutoff: 2.0
+  num_processes: 12
+  verbose: true
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 2000
+        tol: 1.0e-6
+        ignore_diagonals: 2
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150
