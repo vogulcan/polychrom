@@ -267,7 +267,7 @@ The `lef` section controls the 1D lattice simulation.
 | `output_path` | `trajectory/LEFPositions.h5` | Written HDF5 path; overridden by CLI `output_dir`. |
 | `seed` | `null` | Optional NumPy RNG seed for reproducible 1D dynamics. |
 | `topology_kwargs` | `{}` | Keyword arguments passed to `lef.plugins.topology`. |
-| `max_rnapii` | `64` | RNAPII slots recorded per frame **per chain**; the dataset is padded to `max_rnapii * num_chains`. |
+| `max_rnapii` | `64` | RNAPII slots recorded per frame **per chain**; the dataset is padded to `max_rnapii * num_chains`. **Must exceed the live Pol II count.** `load_rnapii` is uncapped, so if the live list exceeds `max_rnapii * num_chains`, recording keeps only the oldest Pols (`rnapiis[:cap]`) — freshly-loaded `POISED`/`PAUSED` Pols (appended last) are truncated and the metrics read ~0% paused / 0% poised. This caps only the recording, not the dynamics. |
 | `plugins` | default `LEFPlugins` | Plugin slots for topology and 1D mechanics. |
 
 `chain_length * num_chains` is the total lattice size. Cohesin count is derived
@@ -318,7 +318,7 @@ Built-in topology choices:
 | Plugin | Main kwargs | Description |
 | --- | --- | --- |
 | `uniform_tad_topology` | `tad_positions`, `capture_prob`, `release_prob`, `symmetric` | Repeats the same CTCF positions on each chain. With `symmetric: true`, each CTCF can capture both leg directions. |
-| `convergent_tad_topology` | `tad_positions`, `boundary_strength`, `release_prob`, `include_chromosome_ends` | Splits each chain at TAD boundaries and places inward-facing barriers on interval edges. |
+| `convergent_tad_topology` | `tad_positions`, `boundary_strength`, `release_prob`, `include_chromosome_ends`, `default_boundary_strength` | Splits each chain at TAD boundaries and places inward-facing barriers on interval edges. `boundary_strength` is a scalar (uniform) or a `{position: strength}` mapping; positions missing from the mapping use `default_boundary_strength` (`0.5`). |
 | `gene_aware_topology` | uniform TAD kwargs plus `genes`, RNAPII, loading, and lesion kwargs | Uniform/symmetric CTCF layout plus gene/RNAPII/lesion bookkeeping. |
 | `gene_aware_convergent_tad_topology` | convergent TAD kwargs plus `genes`, RNAPII, loading, and lesion kwargs | Directional CTCF layout plus gene/RNAPII/lesion bookkeeping. |
 | `ep_pair_topology` | `n_pairs`, `ep_distance`, `pair_spacing`, `first_pair_offset`, `boundary_strength`, `convergent_orientation` | Programmatically places enhancer-promoter pairs and flanking CTCF barriers. |
@@ -353,7 +353,10 @@ Per-gene fields:
 | `tss` | yes | none | Transcription start site and RNAPII loading site. |
 | `tes` | yes | none | Transcription end site. `tes > tss` gives direction `+1`; `tes < tss` gives `-1`. |
 | `load_prob` | no | `rnapii_default_load_prob` | Per-tick probability of loading one POISED RNAPII onto a free TSS. |
-| `enhancer_pos` | no | `null` | Cognate enhancer site used for E-P contact tests and targeted loading. |
+| `enhancer_pos` | no | `null` | Single cognate enhancer site (legacy form) used for E-P contact tests and targeted loading. Mirrors the first entry of `enhancers`. |
+| `enhancers` | no | `()` | List of enhancer sites regulating this gene (shadow / super-enhancer). When given it wins over `enhancer_pos`; `enhancer_pos` is set to the first entry for back-compat. |
+| `enhancer_logic` | no | `"additive"` | How simultaneous E-P contacts combine into transcriptional output: `any` (redundancy, one contact suffices), `all` (every enhancer must contact), `additive` (output scales with #contacts), `synergistic` (super-additive, `#contacts ** enhancer_synergy`). Single-enhancer genes behave identically (0/1) regardless of value. |
+| `enhancer_synergy` | no | `1.5` | Exponent applied to the contact count, used only when `enhancer_logic: synergistic`. |
 | `requires_enhancer` | no | `false` | If true, PAUSED to ELONGATING transition requires current E-P contact. |
 | `load_requires_enhancer` | no | `false` | If true, RNAPII recruitment to the TSS also requires current E-P contact. |
 | `initiation_prob` | no | `1.0` | POISED to PAUSED probability per tick. |
@@ -405,19 +408,32 @@ lef:
     rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
 ```
 
-`stateful_translocate_rnapii` uses four states:
+`stateful_translocate_rnapii` uses five states (code in `attrs["state"]` / the
+`rnapii_states` dataset):
 
-| State | Meaning |
-| --- | --- |
-| `POISED` | Loaded at TSS, not yet initiated. |
-| `PAUSED` | Initiated but promoter-proximal paused. |
-| `ELONGATING` | Productive one-site-at-a-time transcription. |
-| `TERMINATING` | Reached TES and may dwell before unloading. |
+| State | Code | Meaning |
+| --- | --- | --- |
+| `POISED` | 0 | Loaded at TSS, not yet initiated. |
+| `PAUSED` | 1 | Initiated but promoter-proximal paused (regulatory, near TSS). |
+| `ELONGATING` | 2 | Productive one-site-at-a-time transcription. |
+| `TERMINATING` | 3 | Reached TES and may dwell before unloading. |
+| `STALLED` | 4 | In the gene body, attempted a step but physically blocked this tick (cohesin / traffic / lesion). NOT promoter-proximal pause and NOT productive elongation. |
 
-E-P contact during the 1D stage is a loop-containment proxy. A gene with
-`enhancer_pos` is considered in contact when at least one cohesin loop brackets
-the enhancer and promoter, with `ep_contact_tolerance` sites of slack. This is
-used for `requires_enhancer` and `load_requires_enhancer`.
+`STALLED` exists so obstacle stalls do not masquerade as productive
+`ELONGATING` ticks (which would dilute the `%paused` metric toward zero on
+busy genes). A Pol that rolls its speed dice and is blocked → `STALLED`; one
+that does not roll the dice → stays `ELONGATING` (slow but productive). Like
+`POISED` / `PAUSED` / `TERMINATING`, a `STALLED` Pol is a stationary block to
+cohesin (only `ELONGATING` can push), and it blocks cohesin at the elongating
+rate.
+
+E-P contact during the 1D stage is a loop-containment proxy. Each of a gene's
+`enhancers` is considered in contact when at least one cohesin loop brackets
+that enhancer and the promoter (TSS), with `ep_contact_tolerance` sites of
+slack. The per-gene contact *count* (how many enhancers are bracketed) drives an
+output multiplier via `enhancer_logic` / `enhancer_synergy`; for a single-enhancer
+gene this collapses to the old 0/1 behaviour. The resulting factor is used for
+`requires_enhancer` and `load_requires_enhancer`.
 
 Cohesin plays two opposing roles on transcription, both representable here:
 
@@ -436,6 +452,34 @@ Cohesin plays two opposing roles on transcription, both representable here:
 The restraint is evaluated inside `stateful_translocate_rnapii` after the E-P
 gate; with the default `1.0` it is a no-op, so configs that do not set it behave
 exactly as before.
+
+#### State Machine Diagrams
+
+**RNAPII** (`stateful_translocate_rnapii`). Edge labels are the per-tick
+transition probabilities / conditions.
+
+![RNAPII state machine](docs/figs/rnapii_state_machine.svg)
+
+**Cohesin** (per leg, `translocate` / `translocate_with_rnapii`). Each leg
+extrudes outward (`dir = ±1`); the cohesin unloads and a fresh one reloads to
+keep the count constant.
+
+![Cohesin per-leg state machine](docs/figs/cohesin_state_machine.svg)
+
+**RNAPII × cohesin** collision resolution. Two encounter directions plus the
+pause-release coupling.
+
+![RNAPII × cohesin coupling](docs/figs/rnapii_cohesin_interaction.svg)
+
+Figures are generated by [`scripts/make_state_diagrams.py`](scripts/make_state_diagrams.py)
+(pure stdlib, no Mermaid). Pass a config to bake its actual parameter values into
+the interaction figure (panel D lists them); omit it for symbolic labels:
+
+```bash
+python scripts/make_state_diagrams.py configs/config1_small.yaml
+```
+
+Re-run after changing the state machine or the mechanic probabilities.
 
 `translocate_with_rnapii` is also the built-in translocator that knows about
 lesion barriers. It can be used even when RNAPII plugin slots are `null`, as
