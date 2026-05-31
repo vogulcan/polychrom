@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="436" viewBox="0 0 1480 436" font-family="Helvetica, Arial, sans-serif">
+<rect width="1480" height="436" fill="#ffffff"/>
+<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill="context-stroke"/></marker></defs>
+<text x="96" y="34" font-size="17" font-weight="700" fill="#1f2933">Genome topology &#8212; config1_small</text>
+<text x="96" y="53" font-size="11" fill="#6b7280">16 chain(s) &#215; 450 sites (450 kb @ 1000 bp/site) &#183; 48 genes &#183; 48 TADs &#183; 1 tick = 16 s (2540&#215;0.0063s)</text>
+<line x1="96" y1="71" x2="114" y2="71" stroke="#3f3f46" stroke-width="2"/><text x="120" y="74" font-size="10.5" fill="#1f2933">CTCF</text>
+<path d="M 174 66 L 181 71 L 174 76" fill="none" stroke="#009E73" stroke-width="2"/><text x="188" y="74" font-size="10.5" fill="#1f2933">promoter (TSS)</text>
+<ellipse cx="311" cy="71" rx="7" ry="4.5" fill="#E69F00" stroke="#B87A00" stroke-width="1.3"/><text x="324" y="74" font-size="10.5" fill="#1f2933">enhancer</text>
+<line x1="396" y1="71" x2="414" y2="71" stroke="#0072B2" stroke-width="4" stroke-linecap="round" marker-end="url(#ah)"/><text x="422" y="74" font-size="10.5" fill="#1f2933">gene body</text>
+<path d="M 492 73 Q 503 61 514 73" fill="none" stroke="#0072B2" stroke-width="1.6" stroke-dasharray="4 3"/><text x="520" y="74" font-size="10.5" fill="#1f2933">E&#8211;P pair</text>
+<text x="84" y="186" text-anchor="end" font-size="11" font-weight="600" fill="#6b7280">chain 0</text>
+<rect x="96.0" y="130" width="448.0" height="104" fill="#f6f8fa" stroke="#c3cbd6" stroke-width="0.6"/>
+<text x="320.0" y="125" text-anchor="middle" font-size="9" fill="#6b7280">C0:T0</text>
+<text x="96.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">0 kb</text>
+<text x="544.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">150 kb</text>
+<rect x="544.0" y="130" width="448.0" height="104" fill="#eceff3" stroke="#c3cbd6" stroke-width="0.6"/>
+<text x="768.0" y="125" text-anchor="middle" font-size="9" fill="#6b7280">C0:T1</text>
+<text x="544.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">150 kb</text>
+<text x="992.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">300 kb</text>
+<rect x="992.0" y="130" width="448.0" height="104" fill="#f6f8fa" stroke="#c3cbd6" stroke-width="0.6"/>
+<text x="1216.0" y="125" text-anchor="middle" font-size="9" fill="#6b7280">C0:T2</text>
+<text x="992.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">300 kb</text>
+<text x="1440.0" y="245" text-anchor="middle" font-size="8" fill="#c3cbd6">450 kb</text>
+<line x1="96.0" y1="182" x2="1440.0" y2="182" stroke="#9aa3af" stroke-width="2.2"/>
+<path d="M 603.7 181 Q 738.1 124.1 872.5 181" fill="none" stroke="#D55E00" stroke-width="1.6" stroke-dasharray="4 3" opacity="0.85"><title>E0-P1 (genomic 90 kb)</title></path>
+<text x="738.1" y="120.1" text-anchor="middle" font-size="9" fill="#D55E00">90 kb</text>
+<path d="M 723.2 181 Q 797.9 135.8 872.5 181" fill="none" stroke="#D55E00" stroke-width="1.6" stroke-dasharray="4 3" opacity="0.85"><title>E1-P1 (genomic 50 kb)</title></path>
+<text x="797.9" y="131.8" text-anchor="middle" font-size="9" fill="#D55E00">50 kb</text>
+<line x1="529.1" y1="198" x2="424.5" y2="198" stroke="#0072B2" stroke-width="4" stroke-linecap="round" opacity="0.85" marker-end="url(#ah)"><title>G0 TSS 145 &#8594; TES 110</title></line>
+<line x1="872.5" y1="198" x2="977.1" y2="198" stroke="#D55E00" stroke-width="4" stroke-linecap="round" opacity="0.85" marker-end="url(#ah)"><title>G1 TSS 260 &#8594; TES 295</title></line>
+<line x1="1006.9" y1="198" x2="1171.2" y2="198" stroke="#009E73" stroke-width="4" stroke-linecap="round" opacity="0.85" marker-end="url(#ah)"><title>G2 TSS 305 &#8594; TES 360</title></line>
+<line x1="96.0" y1="174" x2="96.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 0 (0 kb)</title></line>
+<text x="96.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">0 kb</text>
+<line x1="541.0" y1="174" x2="541.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 149 (149 kb)</title></line>
+<text x="541.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">149 kb</text>
+<line x1="544.0" y1="174" x2="544.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 150 (150 kb)</title></line>
+<text x="544.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">150 kb</text>
+<line x1="989.0" y1="174" x2="989.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 299 (299 kb)</title></line>
+<text x="989.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">299 kb</text>
+<line x1="992.0" y1="174" x2="992.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 300 (300 kb)</title></line>
+<text x="992.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">300 kb</text>
+<line x1="1437.0" y1="174" x2="1437.0" y2="190" stroke="#3f3f46" stroke-width="2"><title>CTCF @ site 449 (449 kb)</title></line>
+<text x="1437.0" y="170" text-anchor="middle" font-size="8" fill="#3f3f46">449 kb</text>
+<path d="M 529.1 173 L 523.1 182 L 529.1 191" fill="none" stroke="#009E73" stroke-width="2.2" stroke-linejoin="round"/>
+<path d="M 872.5 173 L 878.5 182 L 872.5 191" fill="none" stroke="#009E73" stroke-width="2.2" stroke-linejoin="round"/>
+<ellipse cx="603.7" cy="182" rx="7" ry="4.5" fill="#E69F00" stroke="#B87A00" stroke-width="1.4"/>
+<ellipse cx="723.2" cy="182" rx="7" ry="4.5" fill="#E69F00" stroke="#B87A00" stroke-width="1.4"/>
+<path d="M 1006.9 173 L 1012.9 182 L 1006.9 191" fill="none" stroke="#009E73" stroke-width="2.2" stroke-linejoin="round"/>
+<text x="529.1" y="212" text-anchor="middle" font-size="9" fill="#009E73">P0</text>
+<text x="603.7" y="212" text-anchor="middle" font-size="9" fill="#B87A00">E0</text>
+<text x="723.2" y="212" text-anchor="middle" font-size="9" fill="#B87A00">E1</text>
+<text x="872.5" y="212" text-anchor="middle" font-size="9" fill="#009E73">P1</text>
+<text x="1006.9" y="212" text-anchor="middle" font-size="9" fill="#009E73">P2</text>
+<line x1="96.0" y1="268" x2="1440.0" y2="268" stroke="#6b7280" stroke-width="1.1"/>
+<line x1="96.0" y1="268" x2="96.0" y2="273" stroke="#6b7280" stroke-width="1"/>
+<text x="96.0" y="286" text-anchor="middle" font-size="9.5" fill="#6b7280">0 kb</text>
+<line x1="394.7" y1="268" x2="394.7" y2="273" stroke="#6b7280" stroke-width="1"/>
+<text x="394.7" y="286" text-anchor="middle" font-size="9.5" fill="#6b7280">100 kb</text>
+<line x1="693.3" y1="268" x2="693.3" y2="273" stroke="#6b7280" stroke-width="1"/>
+<text x="693.3" y="286" text-anchor="middle" font-size="9.5" fill="#6b7280">200 kb</text>
+<line x1="992.0" y1="268" x2="992.0" y2="273" stroke="#6b7280" stroke-width="1"/>
+<text x="992.0" y="286" text-anchor="middle" font-size="9.5" fill="#6b7280">300 kb</text>
+<line x1="1290.7" y1="268" x2="1290.7" y2="273" stroke="#6b7280" stroke-width="1"/>
+<text x="1290.7" y="286" text-anchor="middle" font-size="9.5" fill="#6b7280">400 kb</text>
+<text x="1440.0" y="301" text-anchor="end" font-size="9.5" fill="#6b7280">genomic position</text>
+<text x="96" y="330" font-size="12" font-weight="700" fill="#1f2933">Per-gene transcription output &#38; regulatory class <tspan font-weight="400" fill="#6b7280">(1 tick = 16 s; Pol&#8201;II/mRNA&#8201;h/%paused/kb&#8201;min measured from 1D trajectory, per allele; transit/pause/TES = config prediction)</tspan></text>
+<text x="96" y="352" font-size="9.5" font-weight="700" fill="#6b7280">gene</text>
+<text x="166" y="352" font-size="9.5" font-weight="700" fill="#6b7280">str</text>
+<text x="200" y="352" font-size="9.5" font-weight="700" fill="#6b7280">len kb</text>
+<text x="252" y="352" font-size="9.5" font-weight="700" fill="#6b7280">E&#8211;P kb</text>
+<text x="310" y="352" font-size="9.5" font-weight="700" fill="#6b7280">enh</text>
+<text x="368" y="352" font-size="9.5" font-weight="700" fill="#6b7280">regulatory class</text>
+<text x="608" y="352" font-size="9.5" font-weight="700" fill="#009E73">Pol&#8201;II</text>
+<text x="672" y="352" font-size="9.5" font-weight="700" fill="#009E73">mRNA/h</text>
+<text x="744" y="352" font-size="9.5" font-weight="700" fill="#009E73">%paused</text>
+<text x="820" y="352" font-size="9.5" font-weight="700" fill="#009E73">kb/min</text>
+<text x="890" y="352" font-size="9.5" font-weight="700" fill="#6b7280">transit&#8201;m</text>
+<text x="976" y="352" font-size="9.5" font-weight="700" fill="#6b7280">pause&#8201;m</text>
+<text x="1052" y="352" font-size="9.5" font-weight="700" fill="#6b7280">TES&#8201;m</text>
+<line x1="96" y1="356" x2="1440" y2="356" stroke="#c3cbd6" stroke-width="0.8"/>
+<rect x="96" y="362" width="10" height="10" rx="2" fill="#0072B2" opacity="0.85"/><text x="111" y="370" font-size="9.5" fill="#1f2933">0</text>
+<text x="166" y="370" font-size="9.5" fill="#1f2933">−</text>
+<text x="200" y="370" font-size="9.5" fill="#1f2933">35</text>
+<text x="252" y="370" font-size="9.5" fill="#1f2933">—</text>
+<text x="310" y="370" font-size="9.5" fill="#1f2933">0</text>
+<text x="368" y="370" font-size="9.5" fill="#0072B2">constitutive / short-range</text>
+<text x="608" y="370" font-size="9.5" font-weight="600" fill="#009E73">3.10</text>
+<text x="672" y="370" font-size="9.5" font-weight="600" fill="#009E73">9.0</text>
+<text x="744" y="370" font-size="9.5" font-weight="600" fill="#009E73">9</text>
+<text x="820" y="370" font-size="9.5" font-weight="600" fill="#009E73">2.09</text>
+<text x="890" y="370" font-size="9.5" fill="#1f2933">16</text>
+<text x="976" y="370" font-size="9.5" fill="#1f2933">1.8</text>
+<text x="1052" y="370" font-size="9.5" fill="#1f2933">1.3</text>
+<rect x="96" y="378" width="10" height="10" rx="2" fill="#D55E00" opacity="0.85"/><text x="111" y="386" font-size="9.5" fill="#1f2933">1</text>
+<text x="166" y="386" font-size="9.5" fill="#1f2933">+</text>
+<text x="200" y="386" font-size="9.5" fill="#1f2933">35</text>
+<text x="252" y="386" font-size="9.5" fill="#1f2933">50–90</text>
+<text x="310" y="386" font-size="9.5" fill="#1f2933">2 additive</text>
+<text x="368" y="386" font-size="9.5" fill="#D55E00">short-range cohesin-dep</text>
+<text x="608" y="386" font-size="9.5" font-weight="600" fill="#009E73">0.62</text>
+<text x="672" y="386" font-size="9.5" font-weight="600" fill="#009E73">2.0</text>
+<text x="744" y="386" font-size="9.5" font-weight="600" fill="#009E73">55</text>
+<text x="820" y="386" font-size="9.5" font-weight="600" fill="#009E73">2.18</text>
+<text x="890" y="386" font-size="9.5" fill="#1f2933">16</text>
+<text x="976" y="386" font-size="9.5" fill="#1f2933">8.9</text>
+<text x="1052" y="386" font-size="9.5" fill="#1f2933">1.3</text>
+<rect x="96" y="394" width="10" height="10" rx="2" fill="#009E73" opacity="0.85"/><text x="111" y="402" font-size="9.5" fill="#1f2933">2</text>
+<text x="166" y="402" font-size="9.5" fill="#1f2933">+</text>
+<text x="200" y="402" font-size="9.5" fill="#1f2933">55</text>
+<text x="252" y="402" font-size="9.5" fill="#1f2933">—</text>
+<text x="310" y="402" font-size="9.5" fill="#1f2933">0</text>
+<text x="368" y="402" font-size="9.5" fill="#009E73">constitutive / short-range</text>
+<text x="608" y="402" font-size="9.5" font-weight="600" fill="#009E73">4.60</text>
+<text x="672" y="402" font-size="9.5" font-weight="600" fill="#009E73">8.9</text>
+<text x="744" y="402" font-size="9.5" font-weight="600" fill="#009E73">6</text>
+<text x="820" y="402" font-size="9.5" font-weight="600" fill="#009E73">2.10</text>
+<text x="890" y="402" font-size="9.5" fill="#1f2933">24</text>
+<text x="976" y="402" font-size="9.5" fill="#1f2933">1.8</text>
+<text x="1052" y="402" font-size="9.5" fill="#1f2933">1.3</text>
+</svg>

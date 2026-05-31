@@ -7,7 +7,7 @@ lef:
   warmup_steps: 10000
   trajectory_length: 5000
   chunk_size: 50
-  seed: 1001
+  seed: 42
   max_rnapii: 0
 
   topology_kwargs:
@@ -36,12 +36,12 @@ lef:
     target_tss: false
     lesion_prob: 0.0
     genes:
-      - {tss: 40, tes: 100, load_prob: 0.06, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.15, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
+      - {tss: 145, tes: 110, load_prob: 0.06, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.15, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
       # Long-range E-P, cohesin-dependent loop (Kim 2026: distal enhancer-promoter, RAD21-sensitive)
-      - {tss: 290, tes: 220, load_prob: 0.06, requires_enhancer: true, load_requires_enhancer: true, enhancers: [170, 210], enhancer_logic: additive, initiation_prob: 0.5, pause_release_prob: 0.03, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
+      - {tss: 260, tes: 295, load_prob: 0.06, requires_enhancer: true, load_requires_enhancer: true, enhancers: [170, 210], enhancer_logic: additive, initiation_prob: 0.5, pause_release_prob: 0.03, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
       # Short-range constitutive/housekeeping gene, cohesin-independent (Kim 2026): no E-P anchor,
       # high load -> elongating Pol pushes transiting cohesin in the transcription direction.
-      - {tss: 330, tes: 400, load_prob: 0.06, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.15, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
+      - {tss: 305, tes: 360, load_prob: 0.06, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5, pause_release_prob: 0.15, elongation_step_prob: 0.6, pause_offset: 0, termination_prob: 0.2}
 
   plugins:
     topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
@@ -67,7 +67,7 @@ polymer:
   error_tol: 0.01
   collision_rate: 1.0
   precision: mixed
-  seed: 2001
+  seed: 42
   density: 0.2
   pbc: false
   md_steps_per_block: 2540        # 2540 * 0.0063 s = 16.0 s real time per tick
