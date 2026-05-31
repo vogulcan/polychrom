@@ -8,7 +8,7 @@ lef:
   trajectory_length: 5000
   chunk_size: 50
   seed: 1001
-  max_rnapii: 128
+  max_rnapii: 0
 
   topology_kwargs:
     tad_positions: [150, 300]
