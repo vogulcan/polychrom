@@ -16,6 +16,11 @@ CLI: ``polychrom-loopext compare cfgA.yaml cfgB.yaml [--folder-a PATH]
 [--folder-b PATH] [--out DIR] [--label-a NAME] [--label-b NAME]``.
 Multiple comparisons are accepted as ``polychrom-loopext compare baseline_run
 run2 run3 ...`` and write pairwise subdirectories plus ``compare_many.*``.
+
+With ``--cutoffs 2 3 4 5 6`` each cutoff is run into its own ``cutoff_<c>/``
+subfolder and a consolidated ``tad_strength_vs_cutoff.{md,json}`` is written at
+the top level: Flyamer rescaled-TAD strength (obs + O/E, plus B/A fold) per
+contact cutoff.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import h5py
 import numpy as np
 
 from ...hdf5_format import list_URIs
+from . import annotate
 from .config import resolve_plugin
 from .contacts import _effective_map_starts
 from .qc import (
@@ -462,15 +468,19 @@ def _log2_fold(num: np.ndarray, den: np.ndarray) -> np.ndarray:
 
 
 def _plot_contact_maps(ma: np.ndarray, mb: np.ndarray, ea: np.ndarray, eb: np.ndarray,
-                       boundaries: List[int], la: str, lb: str, out: Path) -> None:
+                       boundaries: List[int], la: str, lb: str, out: Path,
+                       ann: Optional[dict] = None) -> None:
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    if ann is None:
+        ann = {"boundaries": list(boundaries), "gene_bodies": [],
+               "promoters": [], "enhancers": [], "ep_pairs": []}
+    _marked = {"n": 0}
 
     def mark_boundaries(ax):
-        for b in boundaries:
-            ax.axhline(b, color="cyan", ls="--", alpha=0.5, lw=0.7)
-            ax.axvline(b, color="cyan", ls="--", alpha=0.5, lw=0.7)
+        annotate.draw(ax, ann, legend=(_marked["n"] == 0))
+        _marked["n"] += 1
 
     obs_a = np.log1p(ma); obs_b = np.log1p(mb)
     lo, hi = _pclip(np.concatenate([obs_a.ravel(), obs_b.ravel()]))
@@ -670,7 +680,10 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
     # ---- 3D plots (need both)
     if a.cmap_obs is not None and b.cmap_obs is not None:
         _plot_contact_maps(a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe,
-                           a.boundaries, label_a, label_b, plots / f"{plot_prefix}contact_map_compare.png")
+                           a.boundaries, label_a, label_b, plots / f"{plot_prefix}contact_map_compare.png",
+                           ann=annotate.from_lists(a.boundaries, a.gene_tss, a.gene_tes,
+                                                   a.gene_enhancers, origin=0,
+                                                   span=a.cmap_obs.shape[0]))
         _plot_ps(ps_curve(a.cmap_obs), ps_curve(b.cmap_obs),
                  label_a, label_b, plots / f"{plot_prefix}Ps_3d_compare.png",
                  title="P(s) — 3D contact map")
@@ -780,14 +793,55 @@ def _cutoff_dirname(cutoff: float) -> str:
     return f"cutoff_{int(c)}" if c.is_integer() else f"cutoff_{c}"
 
 
+def _tad_strength_row(cutoff: float, metrics: Dict[str, Any],
+                      la: str, lb: str) -> Dict[str, Any]:
+    """Pull Flyamer obs + O/E TAD strength (A, B, fold) out of a pair's metrics."""
+    a3 = (metrics.get(la, {}) or {}).get("3d", {}) or {}
+    b3 = (metrics.get(lb, {}) or {}).get("3d", {}) or {}
+    folds = metrics.get("folds", {})
+    return {
+        "cutoff": float(cutoff),
+        "obs_a": a3.get("tad_pileup_obs", {}).get("strength"),
+        "obs_b": b3.get("tad_pileup_obs", {}).get("strength"),
+        "obs_fold": folds.get("tad_strength_obs"),
+        "oe_a": a3.get("tad_pileup_oe", {}).get("strength"),
+        "oe_b": b3.get("tad_pileup_oe", {}).get("strength"),
+        "oe_fold": folds.get("tad_strength_oe"),
+    }
+
+
+def _write_tad_strength_vs_cutoff(rows: List[Dict[str, Any]], path: Path,
+                                  la: str, lb: str) -> None:
+    """Consolidated Flyamer TAD-strength (obs + O/E) across contact cutoffs."""
+    lines = [f"# Flyamer TAD strength vs contact cutoff: {la} vs {lb}\n"]
+    lines.append(
+        f"| cutoff | OBS {la} | OBS {lb} | OBS {lb}/{la} | "
+        f"O/E {la} | O/E {lb} | O/E {lb}/{la} |"
+    )
+    lines.append("|---|---|---|---|---|---|---|")
+    for r in rows:
+        lines.append(
+            f"| {r['cutoff']:g} | {_fmt_summary(r['obs_a'])} | {_fmt_summary(r['obs_b'])} | "
+            f"{_fmt_summary(r['obs_fold'])} | {_fmt_summary(r['oe_a'])} | "
+            f"{_fmt_summary(r['oe_b'])} | {_fmt_summary(r['oe_fold'])} |"
+        )
+    path.write_text("\n".join(lines) + "\n")
+
+
 def run(cfg_a, cfg_b, out_dir: Path,
         label_a: str = "A", label_b: str = "B",
         cutoffs: Optional[List[float]] = None) -> Path:
     out_dir = Path(out_dir)
     if cutoffs:
+        rows: List[Dict[str, Any]] = []
         for c in cutoffs:
-            _run_pair(cfg_a, cfg_b, out_dir / _cutoff_dirname(c),
-                      label_a, label_b, cutoff=c)
+            metrics = _run_pair(cfg_a, cfg_b, out_dir / _cutoff_dirname(c),
+                                label_a, label_b, cutoff=c)
+            rows.append(_tad_strength_row(c, metrics, label_a, label_b))
+        (out_dir / "tad_strength_vs_cutoff.json").write_text(
+            json.dumps(rows, indent=2, default=str))
+        _write_tad_strength_vs_cutoff(rows, out_dir / "tad_strength_vs_cutoff.md",
+                                      label_a, label_b)
         return out_dir
     _run_pair(cfg_a, cfg_b, out_dir, label_a, label_b)
     return out_dir
@@ -820,10 +874,35 @@ def run_many(cfg_baseline, cfg_others: List[Any], out_dir: Path,
     """
     out_dir = Path(out_dir)
     if cutoffs:
+        per_cutoff: List[Tuple[float, Dict[str, Any]]] = []
         for c in cutoffs:
-            run_many(cfg_baseline, cfg_others, out_dir / _cutoff_dirname(c),
-                     baseline_label, comparison_labels, cutoff=c)
+            summ = _run_many_once(cfg_baseline, cfg_others, out_dir / _cutoff_dirname(c),
+                                  baseline_label, comparison_labels, cutoff=c)
+            per_cutoff.append((float(c), summ))
+        agg = {
+            "baseline": baseline_label,
+            "cutoffs": [
+                {"cutoff": c,
+                 "comparisons": {lbl: info["top_line"]
+                                 for lbl, info in s["comparisons"].items()}}
+                for c, s in per_cutoff
+            ],
+        }
+        (out_dir / "tad_strength_vs_cutoff.json").write_text(
+            json.dumps(agg, indent=2, default=str))
+        _write_many_tad_strength_vs_cutoff(
+            per_cutoff, baseline_label, out_dir / "tad_strength_vs_cutoff.md")
         return out_dir
+    _run_many_once(cfg_baseline, cfg_others, out_dir, baseline_label,
+                   comparison_labels)
+    return out_dir
+
+
+def _run_many_once(cfg_baseline, cfg_others: List[Any], out_dir: Path,
+                   baseline_label: str, comparison_labels: Optional[List[str]],
+                   cutoff: Optional[float] = None) -> Dict[str, Any]:
+    """One baseline-vs-many pass at a single cutoff. Writes compare_many.* and
+    returns the summary dict."""
     if not cfg_others:
         raise ValueError("run_many requires at least one comparison config")
     if comparison_labels is None:
@@ -895,7 +974,39 @@ def run_many(cfg_baseline, cfg_others: List[Any], out_dir: Path,
 
     (out_dir / "compare_many.json").write_text(json.dumps(summary, indent=2, default=str))
     _write_many_report(summary, out_dir / "compare_many.md")
-    return out_dir
+    return summary
+
+
+def _write_many_tad_strength_vs_cutoff(
+    per_cutoff: List[Tuple[float, Dict[str, Any]]], baseline_label: str,
+    path: Path,
+) -> None:
+    """Flyamer obs + O/E TAD strength vs contact cutoff, one section per comparison."""
+    lines = [f"# Flyamer TAD strength vs contact cutoff (baseline {baseline_label})\n"]
+    labels: List[str] = []
+    for _c, summ in per_cutoff:
+        for lbl in summ["comparisons"]:
+            if lbl not in labels:
+                labels.append(lbl)
+    for lbl in labels:
+        lines.append(f"\n## {baseline_label} vs {lbl}")
+        lines.append(
+            f"| cutoff | OBS {baseline_label} | OBS {lbl} | OBS {lbl}/{baseline_label} | "
+            f"O/E {baseline_label} | O/E {lbl} | O/E {lbl}/{baseline_label} |"
+        )
+        lines.append("|---|---|---|---|---|---|---|")
+        for c, summ in per_cutoff:
+            top = summ["comparisons"].get(lbl, {}).get("top_line", {})
+            lines.append(
+                f"| {c:g} | "
+                f"{_fmt_summary(top.get('tad_strength_obs_baseline'))} | "
+                f"{_fmt_summary(top.get('tad_strength_obs_comparison'))} | "
+                f"{_fmt_summary(top.get('tad_strength_obs'))} | "
+                f"{_fmt_summary(top.get('tad_strength_oe_baseline'))} | "
+                f"{_fmt_summary(top.get('tad_strength_oe_comparison'))} | "
+                f"{_fmt_summary(top.get('tad_strength_oe'))} |"
+            )
+    path.write_text("\n".join(lines) + "\n")
 
 
 def _write_many_report(summary: Dict[str, Any], path: Path) -> None:

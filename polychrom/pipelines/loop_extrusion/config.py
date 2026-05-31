@@ -238,11 +238,21 @@ class ContactsConfig:
     map_starts: List[int] = field(default_factory=lambda: list(range(0, 39000, 4000)))
     replicate_map_starts_across_chains: bool = False
     map_size: int = 4000
-    cutoff: float = 6.0
+    # One contact-distance cutoff, or a list of cutoffs (e.g. [2, 3, 4, 5, 6]).
+    # With a list, the contacts stage samples one map per cutoff.
+    cutoff: Union[float, List[float]] = 6.0
     num_processes: int = 6
     verbose: bool = True
 
     plugins: ContactsPlugins = field(default_factory=ContactsPlugins)
+
+    @property
+    def cutoff_list(self) -> List[float]:
+        """Normalise ``cutoff`` to a list of floats."""
+        c = self.cutoff
+        if isinstance(c, (list, tuple)):
+            return [float(x) for x in c]
+        return [float(c)]
 
 
 @dataclass

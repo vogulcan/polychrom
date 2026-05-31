@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import h5py
 import numpy as np
 
+from . import annotate
 from .plugins.sampling import iterative_correction
 
 
@@ -633,15 +634,13 @@ def _plot_rescaled_tad_pileup(avg_obs: Optional[np.ndarray], avg_oe: Optional[np
     plt.close(fig)
 
 
-def _plot_contact_map(m: np.ndarray, boundaries: List[int], out: Path) -> None:
+def _plot_contact_map(m: np.ndarray, ann: Optional[dict], out: Path) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.imshow(np.log1p(m), cmap="inferno", origin="lower")
-    for b in boundaries:
-        ax.axhline(b, color="cyan", ls="--", alpha=0.5, lw=0.7)
-        ax.axvline(b, color="cyan", ls="--", alpha=0.5, lw=0.7)
+    annotate.draw(ax, ann, legend=True)
     ax.set_title("Contact map (log1p)")
     fig.tight_layout()
     fig.savefig(out, dpi=120)
@@ -766,7 +765,7 @@ def run(cfg) -> Path:
         metrics["3d"] = m3d
         _plot_ps(ps, paths.plots_dir / "Ps_3d.png", title="P(s) — 3D contact map")
         _plot_insulation(m, windows, boundaries, paths.plots_dir / "insulation_windows.png")
-        _plot_contact_map(m, boundaries, paths.plots_dir / "contact_map.png")
+        _plot_contact_map(m, annotate.from_lef_cfg(cfg.lef), paths.plots_dir / "contact_map.png")
         # Pile-ups (centered on each anchor type) -- obs and O/E, both ICE-balanced.
         anchor_groups: Dict[str, List[int]] = {"CTCF boundary": list(boundaries)}
         if gene_bodies:

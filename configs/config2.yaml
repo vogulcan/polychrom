@@ -211,7 +211,7 @@ contacts:
   replicate_map_starts_across_chains: true
   map_starts: [0]
   map_size: 4000
-  cutoff: 2.0
+  cutoff: [2, 3, 4, 5, 6]
   num_processes: 12
   verbose: true
   plugins:

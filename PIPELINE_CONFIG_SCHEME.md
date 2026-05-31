@@ -85,7 +85,7 @@ contacts:
   map_starts: [<window starts>]
   replicate_map_starts_across_chains: <true/false>
   map_size: <square map size>
-  cutoff: <3D distance cutoff>
+  cutoff: <3D distance cutoff, or list of cutoffs e.g. [2, 3, 4, 5, 6]>
   num_processes: <CPU workers>
   plugins:
     sampler: <PluginSpec>
@@ -712,7 +712,7 @@ PNG.
 | `map_starts` | `[0, 4000, ..., 36000]` | Subchain starts used by the sampler. |
 | `replicate_map_starts_across_chains` | `false` | Expand chain-relative starts across all chains. |
 | `map_size` | `4000` | Square contact-map size for each sampled window. |
-| `cutoff` | `6.0` | 3D distance cutoff for contact counting. |
+| `cutoff` | `6.0` | 3D distance cutoff for contact counting. May be a single value or a list of cutoffs (e.g. `[2, 3, 4, 5, 6]`); see [Multiple Cutoffs](#multiple-cutoffs). |
 | `num_processes` | `6` | CPU workers for contact-map counting. |
 | `verbose` | `true` | Verbosity passed to the sampler. |
 | `plugins` | default `ContactsPlugins` | Sampler, O/E, post-process, and visualization hooks. |
@@ -724,6 +724,33 @@ starts are then expanded as:
 ```text
 chain_idx * chain_length + map_start
 ```
+
+### Multiple Cutoffs
+
+`cutoff` accepts either a single value or a list, e.g.:
+
+```yaml
+contacts:
+  cutoff: [2, 3, 4, 5, 6]
+```
+
+* **One cutoff** (scalar, or a one-element list): the stage writes the
+  configured base paths (`contact_map.npy`, `contact_map_oe.npy`,
+  `contact_map_oe.png`) exactly as before.
+* **Several cutoffs**: the full sampler -> O/E -> post-process -> viz chain runs
+  once per cutoff. Each cutoff's outputs are written to `_cutoff<c>`-tagged paths
+  (e.g. `contact_map_cutoff2.npy`, `contact_map_oe_cutoff3.npy`). The **first**
+  cutoff in the list additionally populates the un-tagged base paths, so the
+  `qc` stage and any tooling that expects `contact_map.npy` keep working (using
+  the first cutoff's map).
+
+Integer cutoffs use a compact tag (`cutoff2`); non-integer cutoffs keep the
+decimal (`cutoff2.5`). The CLI prints one output line per produced file, keyed
+by stage and cutoff tag.
+
+This is independent of the `compare --cutoffs` option, which resamples each
+run's trajectory at several cutoffs into `cutoff_<c>/` subfolders for pairwise
+comparison.
 
 ### Contact Plugins
 
@@ -784,6 +811,12 @@ plots/*.png
 
 Use `--folder-a` and `--folder-b` when the run folders differ from the paths
 stored in the YAML configs.
+
+With `--cutoffs 2 3 4 5 6`, the comparison is repeated per contact-distance
+cutoff (maps resampled from each run's trajectory) into `cutoff_<c>/`
+subfolders, and a consolidated `tad_strength_vs_cutoff.{md,json}` is written at
+the top level reporting Flyamer rescaled-TAD strength (observed and O/E, with
+the B/A fold) at each cutoff.
 
 ## Coordinate Conventions
 

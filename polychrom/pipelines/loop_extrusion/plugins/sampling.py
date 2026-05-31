@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from .... import contactmaps
+from .. import annotate
 
 
 def monomer_resolution_sampler(uris, *, cfg, **kwargs) -> np.ndarray:
@@ -161,12 +162,14 @@ def default_oe_heatmap(
     figsize: tuple[float, float] = (10.0, 10.0),
     dpi: int = 150,
     title: str = "Observed / expected contact map",
+    annotations: dict | None = None,
     **_: object,
 ) -> str:
     """Render an O/E matrix to a PNG.
 
     By default plots log(O/E) on a diverging colormap. Set ``log=False`` to
-    plot the raw matrix.
+    plot the raw matrix. ``annotations`` (boundaries / genes / promoters /
+    enhancers / E-P pairs) are overlaid when supplied.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -179,6 +182,7 @@ def default_oe_heatmap(
 
     fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest")
+    annotate.draw(ax, annotations, legend=True)
     ax.set_title(title)
     ax.set_xlabel("monomer index")
     ax.set_ylabel("monomer index")
