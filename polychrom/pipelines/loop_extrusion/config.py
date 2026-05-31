@@ -125,6 +125,7 @@ class LEFConfig:
     separation: int = 800            # average bp / lattice sites between LEFs
     lifetime: int = 200              # average lifetime (steps)
     lifetime_stalled: int = 200      # lifetime when stalled (not at CTCF)
+    lifetime_ctcf: Optional[int] = None  # lifetime when captured at CTCF (WAPL-protected); None -> lifetime
     warmup_steps: int = 0            # dynamics steps to discard before saving
     trajectory_length: int = 100000  # number of LEF dynamics steps to save
     chunk_size: int = 50             # write chunks to LEFPositions.h5

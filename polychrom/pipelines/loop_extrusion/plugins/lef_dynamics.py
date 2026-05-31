@@ -91,7 +91,7 @@ def unload_prob(cohesin: Cohesin, args: Dict) -> float:
     cause, instead of globally shrinking loops.
     """
     if cohesin.any("CTCF"):
-        return 1.0 / args["LIFETIME"]
+        return 1.0 / args.get("LIFETIME_CTCF", args["LIFETIME"])
     if cohesin.any("rnapii_stalled"):
         return 1.0 / args.get("LIFETIME_RNAPII_STALLED", args["LIFETIME_STALLED"])
     if cohesin.any("stalled"):

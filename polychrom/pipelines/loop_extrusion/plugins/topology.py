@@ -50,6 +50,7 @@ def _base_args(cfg: LEFConfig) -> Dict[str, Any]:
         "num_chains": cfg.num_chains,
         "LIFETIME": cfg.lifetime,
         "LIFETIME_STALLED": cfg.lifetime_stalled,
+        "LIFETIME_CTCF": int(cfg.lifetime_ctcf) if cfg.lifetime_ctcf is not None else cfg.lifetime,
         "ctcfCapture": _empty_ctcf(),
         "ctcfRelease": _empty_ctcf(),
     }

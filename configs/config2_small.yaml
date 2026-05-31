@@ -2,8 +2,8 @@ lef:
   chain_length: 450
   num_chains: 16
   separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
-  lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
-  lifetime_stalled: 82
+  lifetime: 200
+  lifetime_stalled: 240
   warmup_steps: 10000
   trajectory_length: 5000
   chunk_size: 50
@@ -18,7 +18,7 @@ lef:
     default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
-    lifetime_rnapii_stalled: 82
+    lifetime_rnapii_stalled: 200
     rnapii_stall_prob: 0.35        # Pol intrinsically stalls ~1/3 of cohesin hits (pausing on obstacle)
     rnapii_push_prob: 0.50         # co-directional cohesin pushed (Kim 2026: cohesin follows txn; Banigan-Mirny 2022)
     rnapii_headon_push_prob: 0.02  # head-on collision stalls, not reversed (Brandao 2019; replication-txn conflict)
