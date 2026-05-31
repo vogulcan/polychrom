@@ -45,6 +45,7 @@ def load_params(path: str) -> dict:
     g = tk.get
     blk = g("rnapii_block_prob")
     ls = getattr(cfg.lef, "lifetime_stalled", None)
+    lc = getattr(cfg.lef, "lifetime_ctcf", None)
     return {
         "stall": g("rnapii_stall_prob"),
         "push": g("rnapii_push_prob"),
@@ -58,6 +59,7 @@ def load_params(path: str) -> dict:
         "lifetime": getattr(cfg.lef, "lifetime", None),
         "lifetime_stalled": ls,
         "lifetime_rnapii_stalled": g("lifetime_rnapii_stalled", ls),
+        "lifetime_ctcf": lc if lc is not None else getattr(cfg.lef, "lifetime", None),
         "src": Path(path).name,
     }
 
@@ -306,7 +308,7 @@ def fig_cohesin():
     lt = (lambda k: f" = {PARAMS[k]:g}t" if (PARAMS and PARAMS.get(k) is not None)
           else "")
     s.edge((ctcf[0], ctcf[1] + NH / 2), (540 - 46, 516),
-           f"1/LIFETIME{lt('lifetime')}", curve=70, label_size=11)
+           f"1/LIFETIME_CTCF{lt('lifetime_ctcf')}", curve=70, label_size=11)
     s.edge(edge_pt(ext, "bottom"), (540, 516), f"1/LIFETIME{lt('lifetime')}")
     s.edge((stall[0], stall[1] + NH / 2), (540 + 46, 516),
            f"1/LIFETIME_STALLED{lt('lifetime_stalled')} †", curve=-70,
@@ -479,6 +481,7 @@ def fig_interaction():
         ("lifetime", val("lifetime", "—")),
         ("lifetime_stalled", val("lifetime_stalled", "—")),
         ("lifetime_rnapii_stalled", val("lifetime_rnapii_stalled", "—")),
+        ("lifetime_ctcf", val("lifetime_ctcf", "—")),
     ])
 
     s.save("rnapii_cohesin_interaction.svg")

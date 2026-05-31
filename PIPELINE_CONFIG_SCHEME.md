@@ -37,6 +37,7 @@ lef:
   separation: <average sites per cohesin>
   lifetime: <cohesin lifetime in 1D ticks>
   lifetime_stalled: <lifetime when stalled by non-CTCF obstacles>
+  lifetime_ctcf: <optional; lifetime when captured at a CTCF site (defaults to lifetime)>
   warmup_steps: <discarded 1D ticks before recording>
   trajectory_length: <recorded 1D ticks>
   chunk_size: <number of HDF5 write chunks>
@@ -261,6 +262,7 @@ The `lef` section controls the 1D lattice simulation.
 | `separation` | `800` | Average sites per cohesin; `num_lefs = chain_length * num_chains // separation`. |
 | `lifetime` | `200` | Average cohesin lifetime in 1D ticks. |
 | `lifetime_stalled` | `200` | Lifetime used when a cohesin is stalled by a non-CTCF obstacle. |
+| `lifetime_ctcf` | `null` | Lifetime used while a cohesin is captured at a CTCF site. Models WAPL-protected boundary-stabilized residence (Wutz 2017; Haarhuis 2017). `null` falls back to `lifetime`. Larger = longer docked dwell = stronger corner/anchor accumulation. |
 | `warmup_steps` | `0` | 1D ticks to run before recording; discarded from output. |
 | `trajectory_length` | `100000` | Number of recorded 1D frames. This also drives the number of LEF frames available to OpenMM. |
 | `chunk_size` | `50` | Number of HDF5 write chunks used while recording `positions`. |
@@ -279,7 +281,7 @@ by integer division; it is not configured directly.
 | --- | --- | --- |
 | `topology` | `plugins.topology:uniform_tad_topology` | Builds the CTCF layout and any extra 1D bookkeeping. |
 | `load` | `plugins.lef_dynamics:load_one` | Loads one cohesin on adjacent free sites. |
-| `unload_prob` | `plugins.lef_dynamics:unload_prob` | Computes per-tick unload probability for one cohesin. |
+| `unload_prob` | `plugins.lef_dynamics:unload_prob` | Computes per-tick unload probability for one cohesin: `1/LIFETIME_CTCF` if captured at CTCF, else `1/LIFETIME_RNAPII_STALLED` if RNAPII-stalled, else `1/LIFETIME_STALLED` if otherwise stalled, else `1/LIFETIME`. |
 | `capture` | `plugins.lef_dynamics:capture` | Captures cohesin legs at CTCF sites. |
 | `release` | `plugins.lef_dynamics:release` | Releases captured CTCF legs. |
 | `translocate` | `plugins.lef_dynamics:translocate` | Advances cohesin dynamics one tick. |
@@ -309,6 +311,7 @@ chain_length
 num_chains
 LIFETIME
 LIFETIME_STALLED
+LIFETIME_CTCF
 ctcfCapture
 ctcfRelease
 ```
