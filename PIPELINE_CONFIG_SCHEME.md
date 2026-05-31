@@ -267,7 +267,7 @@ The `lef` section controls the 1D lattice simulation.
 | `output_path` | `trajectory/LEFPositions.h5` | Written HDF5 path; overridden by CLI `output_dir`. |
 | `seed` | `null` | Optional NumPy RNG seed for reproducible 1D dynamics. |
 | `topology_kwargs` | `{}` | Keyword arguments passed to `lef.plugins.topology`. |
-| `max_rnapii` | `64` | Number of RNAPII slots recorded per frame when RNAPII dynamics are enabled. |
+| `max_rnapii` | `64` | RNAPII slots recorded per frame **per chain**; the dataset is padded to `max_rnapii * num_chains`. |
 | `plugins` | default `LEFPlugins` | Plugin slots for topology and 1D mechanics. |
 
 `chain_length * num_chains` is the total lattice size. Cohesin count is derived
@@ -388,7 +388,7 @@ Common `gene_aware_*` kwargs:
 | `lesion_prob` | `0.0` | Per-gene, per-tick stochastic lesion occurrence probability. |
 | `lesion_lifetime` | `100` | Lesion countdown before repair. |
 | `lesion_block_prob` | `0.95` | Probability that a lesion blocks an incoming cohesin leg. |
-| `lesion_max` | `64` | Maximum lesion sites recorded per frame. |
+| `lesion_max` | `64` | Maximum simultaneous lesion sites **per chain** (total cap `lesion_max * num_chains`); also sets recording width. |
 | `lesion_spacing` | `0` | If positive, seed periodic lesions in gene bodies at topology creation. |
 
 ### RNAPII Dynamics

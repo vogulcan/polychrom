@@ -13,7 +13,8 @@ feature (independent of who occupies the site) that:
 
 Lesions arise stochastically (``lesion_prob`` per gene per tick), live for
 ``lesion_lifetime`` ticks (countdown to repair), and are capped at
-``lesion_max`` simultaneous lesions.
+``lesion_max`` simultaneous lesions PER CHAIN (total cap is
+``lesion_max * num_chains``).
 
 State lives in ``args["lesions"]``: ``Dict[int, int]`` mapping lesion site to
 its remaining lifetime in ticks.
@@ -71,7 +72,8 @@ def update_lesions(args: Dict) -> None:
     if prob <= 0.0:
         return
     lifetime = max(1, int(args.get("lesion_lifetime", 1)))
-    lmax = int(args.get("lesion_max", 64))
+    # lesion_max is per-chain; total simultaneous cap scales with num_chains.
+    lmax = int(args.get("lesion_max", 64)) * int(args.get("num_chains", 1))
     for gene in args.get("genes", []):
         if len(lesions) >= lmax:
             break

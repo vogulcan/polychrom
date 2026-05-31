@@ -134,8 +134,9 @@ class LEFConfig:
     # Topology kwargs: forwarded to the topology plugin.
     topology_kwargs: Dict[str, Any] = field(default_factory=dict)
 
-    # Maximum concurrent RNAPII count; controls HDF5 padding of the
-    # ``rnapii_positions`` dataset when RNAPII dynamics are enabled.
+    # Maximum concurrent RNAPII count PER CHAIN; the HDF5 ``rnapii_positions``
+    # dataset is padded to ``max_rnapii * num_chains`` so recording capacity
+    # scales with the number of chains.
     max_rnapii: int = 64
 
     plugins: LEFPlugins = field(default_factory=LEFPlugins)

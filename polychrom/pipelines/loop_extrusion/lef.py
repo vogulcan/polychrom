@@ -102,6 +102,7 @@ def run(cfg: LEFConfig) -> Path:
     lesion_update_fn = resolve_plugin(plugins.lesion) if lesion_enabled else None
 
     args = topology_fn(cfg, **cfg.topology_kwargs)
+    args["num_chains"] = cfg.num_chains
 
     occupied, cohesins = initial_state(cfg, args, load_fn)
     rnapiis: list = []
@@ -143,6 +144,9 @@ def run(cfg: LEFConfig) -> Path:
     chunk = max(1, cfg.chunk_size)
     boundaries = np.linspace(0, traj_len, chunk + 1, dtype=int)
 
+    # max_rnapii is per-chain; total recording width scales with num_chains.
+    rnapii_cap = cfg.max_rnapii * cfg.num_chains
+
     with h5py.File(out_path, "w") as fh:
         dset = fh.create_dataset(
             "positions",
@@ -155,20 +159,20 @@ def run(cfg: LEFConfig) -> Path:
         if rnapii_enabled:
             dset_rnapii = fh.create_dataset(
                 "rnapii_positions",
-                shape=(traj_len, cfg.max_rnapii, 2),
+                shape=(traj_len, rnapii_cap, 2),
                 dtype=np.int32,
                 compression="gzip",
                 fillvalue=-1,
             )
             dset_states = fh.create_dataset(
                 "rnapii_states",
-                shape=(traj_len, cfg.max_rnapii),
+                shape=(traj_len, rnapii_cap),
                 dtype=np.int8,
                 compression="gzip",
                 fillvalue=-1,
             )
 
-        lesion_max = int(args.get("lesion_max", 64))
+        lesion_max = int(args.get("lesion_max", 64)) * cfg.num_chains
         dset_lesions = None
         if lesion_enabled:
             dset_lesions = fh.create_dataset(
@@ -186,12 +190,12 @@ def run(cfg: LEFConfig) -> Path:
             n_step = end - start
             buffer = np.empty((n_step, n_lefs, 2), dtype=np.int32)
             rbuf = (
-                np.full((n_step, cfg.max_rnapii, 2), -1, dtype=np.int32)
+                np.full((n_step, rnapii_cap, 2), -1, dtype=np.int32)
                 if rnapii_enabled
                 else None
             )
             sbuf = (
-                np.full((n_step, cfg.max_rnapii), -1, dtype=np.int8)
+                np.full((n_step, rnapii_cap), -1, dtype=np.int8)
                 if rnapii_enabled
                 else None
             )
@@ -223,7 +227,7 @@ def run(cfg: LEFConfig) -> Path:
                     buffer[i, j, 1] = coh.right.pos
 
                 if rbuf is not None:
-                    for j, r in enumerate(rnapiis[: cfg.max_rnapii]):
+                    for j, r in enumerate(rnapiis[:rnapii_cap]):
                         rbuf[i, j, 0] = r.pos
                         rbuf[i, j, 1] = r.gene_id
                         sbuf[i, j] = r.attrs.get("state", -1)
@@ -262,6 +266,7 @@ def run(cfg: LEFConfig) -> Path:
             fh.attrs["lesion_block_prob"] = float(args.get("lesion_block_prob", 0.0))
         if rnapii_enabled:
             fh.attrs["max_rnapii"] = cfg.max_rnapii
+            fh.attrs["rnapii_cap"] = rnapii_cap
             genes = args.get("genes", [])
             if genes:
                 gene_arr = np.array(
