@@ -92,10 +92,8 @@ polymer:
         attraction_radius: 2.0
         restrict_nonbonded_to_chains: true
         replicate_ep_pairs_across_chains: true
-        ep_pairs:
-          - [170, 290]
-          - [210, 290]
-        selective_attraction_energy: 1.5
+        ep_pairs: []
+        selective_attraction_energy: 0.0
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0
         confinement_density: 0.2
