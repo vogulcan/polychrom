@@ -8,7 +8,7 @@ lef:
   trajectory_length: 5000
   chunk_size: 50
   seed: 1001
-  max_rnapii: 16
+  max_rnapii: 0
 
   topology_kwargs:
     tad_positions: [150, 300]
@@ -45,8 +45,8 @@ lef:
     capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
     release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
     translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
-    rnapii_load:        polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
-    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+    rnapii_load:        null
+    rnapii_translocate: null
 
 viewer:
   max_frames: 1000
