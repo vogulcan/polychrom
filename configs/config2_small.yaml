@@ -1,6 +1,6 @@
 lef:
   chain_length: 450
-  num_chains: 32
+  num_chains: 16
   separation: 200              # ~1 cohesin per 200 kb (Rao 2014 ~1 loop/185 kb)
   lifetime: 82                 # 82 ticks * 16 s ~= 22 min residence (Hansen 2017)
   lifetime_stalled: 82
@@ -18,15 +18,15 @@ lef:
     default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
-    lifetime_rnapii_stalled: 24
-    rnapii_stall_prob: 0.20         
+    lifetime_rnapii_stalled: 82
+    rnapii_stall_prob: 0.35   
     rnapii_push_prob: 0.40
     rnapii_headon_push_prob: 0.02
     rnapii_pause_cohesin_restraint: 0.3
     rnapii_pause_restraint_window: 1
     rnapii_poised_block_prob: 0.5
     rnapii_paused_block_prob: 0.95
-    rnapii_elongating_block_prob: 0.90
+    rnapii_elongating_block_prob: 0.95
     rnapii_terminating_block_prob: 0.95
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
@@ -36,7 +36,7 @@ lef:
     target_tss: false
     lesion_prob: 0.0
     genes:
-      - {tss: 290, tes: 220, load_prob: 0.2, requires_enhancer: true, load_requires_enhancer: true, enhancers: [170, 210], enhancer_logic: additive, initiation_prob: 0.5, pause_release_prob: 0.2, elongation_step_prob: 0.4, pause_offset: 0, termination_prob: 0.15}
+      - {tss: 290, tes: 220, load_prob: 0.2, requires_enhancer: true, load_requires_enhancer: true, enhancers: [170, 210], enhancer_logic: additive, initiation_prob: 1.0, pause_release_prob: 0.2, elongation_step_prob: 0.4, pause_offset: 0, termination_prob: 0.01}
 
   plugins:
     topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology

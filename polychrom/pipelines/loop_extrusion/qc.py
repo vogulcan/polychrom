@@ -188,8 +188,13 @@ def asymmetry_index(positions: np.ndarray) -> float:
 
 
 def rnapii_metrics(rnapii_positions: np.ndarray, rnapii_states: np.ndarray,
-                   tick_seconds: float = 8.0) -> Dict[str, Any]:
-    """State mix + convoy + realized elongation speed."""
+                   tick_seconds: float, rnapii_ids: np.ndarray) -> Dict[str, Any]:
+    """State mix + convoy + realized elongation speed.
+
+    Recording columns are the live, compacted RNAPII list, so a column is NOT a
+    stable Pol II across ticks. Elongation speed is measured per ``rnapii_ids``
+    (uid) track: consecutive ELONGATING ticks of the same uid are true steps.
+    """
     present = rnapii_positions[:, :, 0] >= 0
     states = rnapii_states.astype(int)
     tot = present.sum()
@@ -205,25 +210,17 @@ def rnapii_metrics(rnapii_positions: np.ndarray, rnapii_states: np.ndarray,
             "ELONGATING": float(100 * ((states == 2) & present).sum() / tot),
             "TERMINATING": float(100 * ((states == 3) & present).sum() / tot),
         }
-        # realized elongation speed: per slot, sum |step| while ELONG. Filter
-        # to |delta| <= 1 to drop slot-reuse jumps (a slot is recycled when a
-        # Pol II unloads and another loads -> apparent huge delta in 1 tick).
+        sites = rnapii_positions[:, :, 0]
         adv = 0
         eticks = 0
-        gids = rnapii_positions[:, :, 1]
-        for k in range(rnapii_positions.shape[1]):
-            pos = rnapii_positions[:, k, 0]
-            stt = states[:, k]
-            gid = gids[:, k]
-            for t in range(1, rnapii_positions.shape[0]):
-                if stt[t] != 2 or stt[t - 1] != 2:
+        for k in range(sites.shape[1]):
+            for t in range(1, sites.shape[0]):
+                if states[t, k] != 2 or states[t - 1, k] != 2:
                     continue
-                if pos[t] < 0 or pos[t - 1] < 0:
+                if rnapii_ids[t, k] < 0 or rnapii_ids[t, k] != rnapii_ids[t - 1, k]:
                     continue
-                if gid[t] != gid[t - 1]:        # slot recycled
-                    continue
-                d = int(pos[t] - pos[t - 1])
-                if abs(d) > 1:                  # >1 site/tick = not a true step
+                d = int(sites[t, k] - sites[t - 1, k])
+                if abs(d) > 1:
                     continue
                 adv += abs(d)
                 eticks += 1
@@ -233,13 +230,20 @@ def rnapii_metrics(rnapii_positions: np.ndarray, rnapii_states: np.ndarray,
     return out
 
 
-def rnapii_per_gene_throughput(rnapii_positions: np.ndarray, genes: List[Tuple[int, int]]) -> Dict[str, int]:
-    """Approx throughput = # distinct slot-tracks whose final pos crosses TES."""
-    # crude: count slot-frames where pos==tes
+def rnapii_per_gene_throughput(rnapii_positions: np.ndarray,
+                               genes: List[Tuple[int, int]],
+                               rnapii_ids: np.ndarray) -> Dict[str, int]:
+    """Completed transcripts per gene = # distinct Pol II (uid) that reach TES.
+
+    Counts distinct completing Pol II, not TES-frames: a terminating Pol II
+    dwells at the TES for several ticks across shuffled columns, so summing
+    ``pos==tes`` frames (the old method) massively overcounts.
+    """
+    sites = rnapii_positions[:, :, 0]
     out: Dict[str, int] = {}
     for i, (tss, tes) in enumerate(genes):
-        hits = int((rnapii_positions[:, :, 0] == tes).sum())
-        out[f"gene{i}_tes_visits"] = hits
+        uids = rnapii_ids[sites == tes]
+        out[f"gene{i}_completions"] = int(len(set(uids[uids >= 0].tolist())))
     return out
 
 
@@ -678,6 +682,7 @@ def run(cfg) -> Path:
         rnapii_enabled = bool(fh.attrs.get("rnapii_enabled", False))
         rnapii_positions = fh["rnapii_positions"][:] if "rnapii_positions" in fh else None
         rnapii_states = fh["rnapii_states"][:] if "rnapii_states" in fh else None
+        rnapii_ids = fh["rnapii_ids"][:] if "rnapii_ids" in fh else None
         lesion_enabled = bool(fh.attrs.get("lesion_enabled", False))
         lesions = fh["lesions"][:] if "lesions" in fh else None
         genes_ds = fh["genes"][:] if "genes" in fh else None
@@ -690,12 +695,25 @@ def run(cfg) -> Path:
         for g in genes_ds:
             lo, hi = sorted((int(g["tss"]), int(g["tes"])))
             gene_bodies.append((lo, hi))
+    # Directional (tss, tes) per gene -- kept separate from the sorted gene_bodies
+    # so per-gene completions count Pol reaching the real TES even on reverse-
+    # strand genes (tes < tss), where sorting would mistake the TSS for the TES.
+    gene_dirs: List[Tuple[int, int]] = (
+        [(int(g["tss"]), int(g["tes"])) for g in genes_ds] if genes_ds is not None else []
+    )
+
+    # tad_positions / anchors are chain-relative, but recorded positions are
+    # absolute across all chains. Fold to chain-relative so every chain's legs
+    # are matched against the (replicated) boundaries -- otherwise only chain 0
+    # contributes while the denominator spans all chains, diluting the metrics
+    # by ~num_chains.
+    positions_rel = positions % chain_length
 
     metrics: Dict[str, Any] = {"chain_length": chain_length, "num_chains": num_chains}
     metrics["sanity_1d"] = sanity_1d(positions, chain_length, num_chains)
     metrics["loop_length"] = loop_length_stats(positions, edges=[0, 50, 100, 150, 200, 300, 500, chain_length])
-    metrics["classification"] = cohesin_classification(positions, anch)
-    metrics["boundary_crossing"] = boundary_crossing(positions, boundaries)
+    metrics["classification"] = cohesin_classification(positions_rel, anch)
+    metrics["boundary_crossing"] = boundary_crossing(positions_rel, boundaries)
     metrics["asymmetry_index"] = asymmetry_index(positions)
 
     ps1d = ps_curve_1d(positions, chain_length, num_chains)
@@ -708,15 +726,22 @@ def run(cfg) -> Path:
     }
 
     occ = cohesin_occupancy(positions, chain_length * num_chains)
-    metrics["cohesin_at_ctcf_anchor_sum"] = float(sum(occ[s] for s in anch if s < len(occ)))
+    # Replicate the chain-relative anchors onto every chain before summing the
+    # absolute per-site occupancy.
+    anch_abs = {a + c * chain_length for c in range(num_chains) for a in anch}
+    metrics["cohesin_at_ctcf_anchor_sum"] = float(
+        sum(occ[s] for s in anch_abs if 0 <= s < len(occ)))
     if gene_bodies:
         metrics["cohesin_at_gene_bodies_sum"] = float(sum(occ[a:b + 1].sum() for a, b in gene_bodies))
 
-    if rnapii_enabled and rnapii_positions is not None and rnapii_states is not None:
-        metrics["rnapii"] = rnapii_metrics(rnapii_positions, rnapii_states)
-        if gene_bodies:
-            metrics["rnapii"]["per_gene_tes_visits"] = rnapii_per_gene_throughput(
-                rnapii_positions, gene_bodies)
+    if (rnapii_enabled and rnapii_positions is not None
+            and rnapii_states is not None and rnapii_ids is not None):
+        tick_s = float(cfg.polymer.md_steps_per_block) * 0.0063
+        metrics["rnapii"] = rnapii_metrics(
+            rnapii_positions, rnapii_states, tick_seconds=tick_s, rnapii_ids=rnapii_ids)
+        if gene_dirs:
+            metrics["rnapii"]["per_gene_completions"] = rnapii_per_gene_throughput(
+                rnapii_positions, gene_dirs, rnapii_ids=rnapii_ids)
 
     if lesion_enabled and lesions is not None:
         metrics["lesions"] = lesion_metrics(lesions, gene_bodies)

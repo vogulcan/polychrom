@@ -89,6 +89,7 @@ def measure_per_gene(h5_path: Path, cfg) -> Tuple[List[dict], Dict]:
             raise ValueError(f"{h5_path}: RNAPII not enabled in this run.")
         pos = fh["rnapii_positions"][:]          # (T, R, 2): [site, gene_id]
         states = fh["rnapii_states"][:].astype(int)
+        ids = fh["rnapii_ids"][:]                 # (T, R): stable per-Pol uid
         genes = fh["genes"][:]
         num_chains = int(fh.attrs.get("num_chains", 1))
 
@@ -110,21 +111,29 @@ def measure_per_gene(h5_path: Path, cfg) -> Tuple[List[dict], Dict]:
         paused = sel & (states == PAUSED)
         pct_paused = (100.0 * paused.sum() / n_present) if n_present else 0.0
 
-        completions = 0
-        for k in range(site_pos.shape[1]):
-            arrived = (site_pos[:, k] == tes) & (gid[:, k] == g)
-            completions += int(np.sum(arrived[1:] & ~arrived[:-1]))
+        # Recording columns are the live, compacted RNAPII list, so a column is
+        # not a stable Pol II across ticks. Use the per-Pol uid: a completion is
+        # one distinct uid of this gene that reaches the TES.
+        tes_uids = ids[(site_pos == tes) & (gid == g)]
+        completions = int(len({int(u) for u in tes_uids if u >= 0}))
         per_hour = completions / total_seconds * 3600.0
 
+        # Elongation speed for THIS gene: single-site steps over consecutive
+        # ELONGATING ticks of the same uid in the same column. Steps where the Pol
+        # shifts columns (an earlier Pol unloads -> the live list compacts) are
+        # dropped; the estimate stays unbiased but uses fewer samples than the raw
+        # tick count. Filter by gid so each gene reports its own speed, not the
+        # lattice-wide mean.
         adv = eticks = 0
         for k in range(site_pos.shape[1]):
-            cp, cs, cg = site_pos[:, k], states[:, k], gid[:, k]
             for t in range(1, T):
-                if cs[t] != ELONGATING or cs[t - 1] != ELONGATING:
+                if states[t, k] != ELONGATING or states[t - 1, k] != ELONGATING:
                     continue
-                if cp[t] < 0 or cp[t - 1] < 0 or cg[t] != g or cg[t - 1] != g:
+                if gid[t, k] != g or gid[t - 1, k] != g:
                     continue
-                d = int(cp[t] - cp[t - 1])
+                if ids[t, k] < 0 or ids[t, k] != ids[t - 1, k]:
+                    continue
+                d = int(site_pos[t, k] - site_pos[t - 1, k])
                 if abs(d) > 1:
                     continue
                 adv += abs(d); eticks += 1

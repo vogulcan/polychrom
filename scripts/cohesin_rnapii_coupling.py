@@ -163,7 +163,6 @@ def main(argv: list[str]) -> int:
     for row in genes:
         g = int(row["gene_id"]); tss = int(row["tss"]); tes = int(row["tes"])
         d = int(row["direction"])
-        chain_lo = (g // (len(genes)//num_chains)) * 0  # not used; keep absolute
         # upstream = behind TSS, downstream = beyond TES (transcription frame)
         up = (tss - d * W, tss) if d > 0 else (tss, tss - d * W)
         dn = (tes, tes + d * W) if d > 0 else (tes + d * W, tes)
@@ -199,7 +198,7 @@ def main(argv: list[str]) -> int:
 
         nascent_list.append(nascent)
         if contact_freq == contact_freq:
-            contact_list.append((contact_freq, nascent))
+            contact_list.append((g, contact_freq, nascent))
         if ratio == ratio:
             ratio_list.append(ratio)
         print(f"{g:>5} {d:>+4d} {up_occ:>9.4f} {dn_occ:>9.4f} {ratio:>11.2f} {nascent:>9.3f}")
@@ -243,13 +242,13 @@ def main(argv: list[str]) -> int:
 
     if len(contact_list) >= 3:
         c = np.array(contact_list)
-        # Spearman via rank correlation
-        rc = np.argsort(np.argsort(c[:, 0])); rn = np.argsort(np.argsort(c[:, 1]))
+        # Spearman via rank correlation (cols: gene_id, contact_freq, nascent)
+        rc = np.argsort(np.argsort(c[:, 1])); rn = np.argsort(np.argsort(c[:, 2]))
         rho = float(np.corrcoef(rc, rn)[0, 1])
         print("\n## 3. Cooperation: E-P contact frequency vs nascent output")
         print("{:>5} {:>14} {:>10}".format("gene", "EP_contact_frq", "nascent"))
-        for (cf, na), row in zip(contact_list, genes):
-            print(f"{int(row['gene_id']):>5} {cf:>14.3f} {na:>10.3f}")
+        for gid_c, cf, na in contact_list:
+            print(f"{int(gid_c):>5} {cf:>14.3f} {na:>10.3f}")
         print(f"\n# Spearman rho(E-P contact, nascent) = {rho:.2f} "
               f"({'positive => cohesin loop drives output (MATCH)' if rho > 0 else 'non-positive'})")
     return 0

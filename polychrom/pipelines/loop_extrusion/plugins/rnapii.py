@@ -103,12 +103,13 @@ class Gene:
 class RNAPII:
     """One translocating polymerase."""
 
-    __slots__ = ("pos", "gene_id", "direction", "attrs")
+    __slots__ = ("pos", "gene_id", "direction", "uid", "attrs")
 
-    def __init__(self, pos: int, gene_id: int, direction: int):
+    def __init__(self, pos: int, gene_id: int, direction: int, uid: int = -1):
         self.pos = pos
         self.gene_id = gene_id
         self.direction = direction
+        self.uid = uid              # stable per-Pol identity for trajectory tracks
         self.attrs: Dict[str, object] = {}
 
 
@@ -273,7 +274,9 @@ def load_rnapii(rnapiis: List[RNAPII], occupied: np.ndarray, args: Dict) -> None
             continue
         if occupied[gene.tss] != FREE:
             continue
-        r = RNAPII(pos=gene.tss, gene_id=gene.gene_id, direction=gene.direction)
+        uid = int(args.get("_rnapii_uid_next", 0))
+        args["_rnapii_uid_next"] = uid + 1
+        r = RNAPII(pos=gene.tss, gene_id=gene.gene_id, direction=gene.direction, uid=uid)
         r.attrs["state"] = STATE_POISED
         occupied[gene.tss] = RNAPII_CELL
         rnapii_by_pos[gene.tss] = r
@@ -337,9 +340,15 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
         return False
 
     if target == gene.tes:
+        # TES is a normal occupiable slot: a terminating Pol II dwelling here must
+        # block cohesin (rnapii_terminating_block_prob) and exclude other Pol II.
+        # Stall if the slot is taken rather than stacking / erasing a marker.
+        if occupied[target] != FREE:
+            return False
         rnapii_by_pos.pop(r.pos, None)
         if occupied[r.pos] == RNAPII_CELL:
             occupied[r.pos] = FREE
+        occupied[target] = RNAPII_CELL
         r.pos = target
         rnapii_by_pos[target] = r
         return True
@@ -350,6 +359,10 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
         return False
 
     if cell == COHESIN:
+        # The grid may show COHESIN while an RNAPII is masked under a tunnelling
+        # cohesin (bypass). Never step onto a cell that still holds a Pol II.
+        if target in rnapii_by_pos:
+            return False
         leg = args["cohesin_leg_by_pos"].get(target)
         if _resolve_head_on(r, leg, args) == "stall":
             return False
@@ -487,10 +500,11 @@ def stateful_translocate_rnapii(
 
         if state == STATE_POISED:
             if np.random.random() < gene.initiation_prob:
-                if gene.pause_offset > 0:
-                    # Try to hop to pause site; if blocked, pause in place.
-                    if _try_single_step(r, gene, occupied, args):
-                        pass  # advanced one step toward pause
+                # Hop up to pause_offset sites toward the pause site; stop early
+                # if blocked. pause_offset is a distance, not a flag.
+                for _ in range(gene.pause_offset):
+                    if not _try_single_step(r, gene, occupied, args):
+                        break
                 r.attrs["state"] = STATE_PAUSED
             continue
 

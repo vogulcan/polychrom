@@ -370,6 +370,7 @@ Common `gene_aware_*` kwargs:
 | `replicate_genes_across_chains` | `false` | Treat gene coordinates as chain-relative and copy them to each chain. |
 | `rnapii_default_load_prob` | `0.02` | Default gene `load_prob`. |
 | `rnapii_stride` | `1` | Step count for the legacy single-state RNAPII translocator. |
+| `lifetime_rnapii_stalled` | `lifetime_stalled` | Cohesin residence (1D ticks) used **only** when a cohesin is stalled or pushed *by RNAPII* (the `rnapii_stalled` flag), modeling active Pol II eviction of cohesin (Busslinger 2017; Jeppsson 2022). Kept separate from generic `lifetime_stalled` so depleting RNAPII restores residence only where transcription caused eviction (the config1-vs-config2 loop-shortening mechanism). Smaller = faster eviction = shorter loops in gene bodies. |
 | `rnapii_stall_prob` | `0.4` | Intrinsic probability that elongating RNAPII stalls on a cohesin obstacle. |
 | `rnapii_push_prob` | `0.3` | Probability that an elongating RNAPII pushes a co-directional cohesin leg. |
 | `rnapii_headon_push_prob` | `0.0` | Probability that an elongating RNAPII pushes a head-on cohesin leg. |

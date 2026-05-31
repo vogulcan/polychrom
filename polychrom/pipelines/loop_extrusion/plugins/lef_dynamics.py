@@ -274,8 +274,14 @@ def translocate_with_rnapii(
     push specific legs when needed.
     """
     leg_by_pos: Dict[int, "Leg"] = args.setdefault("cohesin_leg_by_pos", {})
-    tes_by_pos: Dict[int, int] = args.get("tes_by_pos", {})
     rnapii_by_pos = args.get("rnapii_by_pos", {})
+
+    def _vacate(p: int) -> None:
+        # A cohesin leg leaving site ``p``: if an RNAPII still occupies that site
+        # (the leg had bypassed/tunnelled through it), restore the RNAPII marker
+        # instead of clearing to FREE -- otherwise a stationary Pol II (e.g. one
+        # terminating at its TES) loses its occupancy and another Pol stacks on it.
+        occupied[p] = RNAPII_CELL if p in rnapii_by_pos else FREE
     lesions = args.get("lesions")
     lesion_block_prob = float(args.get("lesion_block_prob", 1.0))
 
@@ -285,8 +291,8 @@ def translocate_with_rnapii(
         if np.random.random() < prob:
             for side in (-1, 1):
                 leg_by_pos.pop(cohesins[i][side].pos, None)
-            occupied[cohesins[i].left.pos] = FREE
-            occupied[cohesins[i].right.pos] = FREE
+            _vacate(cohesins[i].left.pos)
+            _vacate(cohesins[i].right.pos)
             del cohesins[i]
             load_fn(cohesins, occupied, args)
             # Newly loaded cohesin: register its leg positions.
@@ -327,7 +333,7 @@ def translocate_with_rnapii(
                 leg.attrs["stalled"] = False
                 leg.attrs["pushed"] = False
                 leg.attrs["rnapii_stalled"] = False
-                occupied[leg.pos] = FREE
+                _vacate(leg.pos)
                 occupied[target] = COHESIN
                 leg.pos = target
                 leg_by_pos[target] = leg
@@ -340,19 +346,7 @@ def translocate_with_rnapii(
 
             # cell == RNAPII_CELL
             r = rnapii_by_pos.get(target)
-            if r is not None and target in tes_by_pos and tes_by_pos[target] == r.gene_id:
-                # RNAPII parked at its own TES -> bypass.
-                # Step onto the TES site; both markers coexist until the
-                # RNAPII unloads next tick (RNAPII translocate phase
-                # handles the cleanup and won't overwrite COHESIN).
-                leg_by_pos.pop(leg.pos, None)
-                leg.attrs["stalled"] = False
-                leg.attrs["rnapii_stalled"] = False
-                occupied[leg.pos] = FREE
-                occupied[target] = COHESIN  # bypass: cohesin takes the slot
-                leg.pos = target
-                leg_by_pos[target] = leg
-            elif r is not None and not _rnapii_blocks_cohesin(r, args):
+            if r is not None and not _rnapii_blocks_cohesin(r, args):
                 # Probabilistic bypass: keep the RNAPII bookkeeping entry,
                 # but the occupancy grid marks the cohesin leg at this site.
                 # When RNAPII advances later, it will leave the cohesin marker
@@ -360,7 +354,7 @@ def translocate_with_rnapii(
                 leg_by_pos.pop(leg.pos, None)
                 leg.attrs["stalled"] = False
                 leg.attrs["rnapii_stalled"] = False
-                occupied[leg.pos] = FREE
+                _vacate(leg.pos)
                 occupied[target] = COHESIN
                 leg.pos = target
                 leg_by_pos[target] = leg

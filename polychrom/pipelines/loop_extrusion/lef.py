@@ -156,6 +156,7 @@ def run(cfg: LEFConfig) -> Path:
         )
         dset_rnapii = None
         dset_states = None
+        dset_ids = None
         if rnapii_enabled:
             dset_rnapii = fh.create_dataset(
                 "rnapii_positions",
@@ -168,6 +169,16 @@ def run(cfg: LEFConfig) -> Path:
                 "rnapii_states",
                 shape=(traj_len, rnapii_cap),
                 dtype=np.int8,
+                compression="gzip",
+                fillvalue=-1,
+            )
+            # Stable per-Pol identity: the live rnapii list is compacted on unload,
+            # so a column index is NOT a fixed Pol II. Record each Pol's uid so
+            # downstream can reconstruct per-Pol tracks across column shuffles.
+            dset_ids = fh.create_dataset(
+                "rnapii_ids",
+                shape=(traj_len, rnapii_cap),
+                dtype=np.int32,
                 compression="gzip",
                 fillvalue=-1,
             )
@@ -196,6 +207,11 @@ def run(cfg: LEFConfig) -> Path:
             )
             sbuf = (
                 np.full((n_step, rnapii_cap), -1, dtype=np.int8)
+                if rnapii_enabled
+                else None
+            )
+            ibuf = (
+                np.full((n_step, rnapii_cap), -1, dtype=np.int32)
                 if rnapii_enabled
                 else None
             )
@@ -231,6 +247,7 @@ def run(cfg: LEFConfig) -> Path:
                         rbuf[i, j, 0] = r.pos
                         rbuf[i, j, 1] = r.gene_id
                         sbuf[i, j] = r.attrs.get("state", -1)
+                        ibuf[i, j] = r.uid
 
                 if lbuf is not None:
                     for j, site in enumerate(sorted(args["lesions"])[:lesion_max]):
@@ -242,6 +259,7 @@ def run(cfg: LEFConfig) -> Path:
             if dset_rnapii is not None:
                 dset_rnapii[start:end] = rbuf
                 dset_states[start:end] = sbuf
+                dset_ids[start:end] = ibuf
             if dset_lesions is not None:
                 dset_lesions[start:end] = lbuf
 
