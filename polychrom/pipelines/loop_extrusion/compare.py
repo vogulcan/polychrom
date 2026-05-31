@@ -58,7 +58,9 @@ class RunData:
     positions: np.ndarray
     rnapii_positions: Optional[np.ndarray]
     rnapii_states: Optional[np.ndarray]
+    rnapii_ids: Optional[np.ndarray]
     rnapii_enabled: bool
+    tick_seconds: float
     lesions: Optional[np.ndarray]
     lesion_enabled: bool
     genes_ds: Optional[np.ndarray]
@@ -142,6 +144,7 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
         rnapii_enabled = bool(fh.attrs.get("rnapii_enabled", False))
         rp = fh["rnapii_positions"][:] if "rnapii_positions" in fh else None
         rs = fh["rnapii_states"][:] if "rnapii_states" in fh else None
+        ri = fh["rnapii_ids"][:] if "rnapii_ids" in fh else None
         lesion_enabled = bool(fh.attrs.get("lesion_enabled", False))
         les = fh["lesions"][:] if "lesions" in fh else None
         genes_ds = fh["genes"][:] if "genes" in fh else None
@@ -176,7 +179,9 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
 
     return RunData(
         label=label, positions=pos, rnapii_positions=rp, rnapii_states=rs,
-        rnapii_enabled=rnapii_enabled, lesions=les, lesion_enabled=lesion_enabled,
+        rnapii_ids=ri, rnapii_enabled=rnapii_enabled,
+        tick_seconds=float(cfg.polymer.md_steps_per_block) * 0.0063,
+        lesions=les, lesion_enabled=lesion_enabled,
         genes_ds=genes_ds, gene_tss=gene_tss, gene_tes=gene_tes,
         gene_enhancers=gene_enhancers,
         chain_length=chain_length, num_chains=num_chains,
@@ -195,7 +200,9 @@ def _collect_1d(r: RunData) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "sanity": sanity_1d(r.positions, r.chain_length, r.num_chains),
         "loop_length": loop_length_stats(
-            r.positions, edges=[0, 50, 100, 150, 200, 300, 500, r.chain_length]),
+            r.positions,
+            edges=[e for e in [0, 50, 100, 150, 200, 300, 500]
+                   if e < r.chain_length] + [r.chain_length]),
         "classification": cohesin_classification(r.positions, anch),
         "boundary_crossing": boundary_crossing(r.positions, r.boundaries),
         "boundary_crossing_stripes": boundary_crossing_stripes(r.positions, r.boundaries),
@@ -212,8 +219,11 @@ def _collect_1d(r: RunData) -> Dict[str, Any]:
     }
     if r.gene_bodies:
         out["cohesin_at_gene_bodies_sum"] = float(sum(occ[a:b + 1].sum() for a, b in r.gene_bodies))
-    if r.rnapii_enabled and r.rnapii_positions is not None and r.rnapii_states is not None:
-        out["rnapii"] = rnapii_metrics(r.rnapii_positions, r.rnapii_states)
+    if (r.rnapii_enabled and r.rnapii_positions is not None
+            and r.rnapii_states is not None and r.rnapii_ids is not None):
+        out["rnapii"] = rnapii_metrics(
+            r.rnapii_positions, r.rnapii_states,
+            tick_seconds=r.tick_seconds, rnapii_ids=r.rnapii_ids)
     if r.lesion_enabled and r.lesions is not None:
         out["lesions"] = lesion_metrics(r.lesions, r.gene_bodies)
         out["lesions"]["cohesin_flank_enrichment"] = cohesin_at_lesion_flanks(

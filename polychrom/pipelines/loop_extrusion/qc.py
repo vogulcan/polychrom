@@ -711,7 +711,8 @@ def run(cfg) -> Path:
 
     metrics: Dict[str, Any] = {"chain_length": chain_length, "num_chains": num_chains}
     metrics["sanity_1d"] = sanity_1d(positions, chain_length, num_chains)
-    metrics["loop_length"] = loop_length_stats(positions, edges=[0, 50, 100, 150, 200, 300, 500, chain_length])
+    loop_edges = [e for e in [0, 50, 100, 150, 200, 300, 500] if e < chain_length] + [chain_length]
+    metrics["loop_length"] = loop_length_stats(positions, edges=loop_edges)
     metrics["classification"] = cohesin_classification(positions_rel, anch)
     metrics["boundary_crossing"] = boundary_crossing(positions_rel, boundaries)
     metrics["asymmetry_index"] = asymmetry_index(positions)
