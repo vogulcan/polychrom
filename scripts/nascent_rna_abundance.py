@@ -6,13 +6,20 @@ and states) plus the YAML config, and reports per-gene nascent-RNA abundance.
 
 Real-time calibration
 ---------------------
-1 LEF tick == 1 MD block == ``polymer.md_steps_per_block`` integrator steps.
-With the Hansen-lab MSD calibration (1 MD step ~= 0.0063 s; same error_tol /
-collision_rate / density), the wall-clock duration of one tick is::
+Biological time is anchored to the **cohesin clock**, not the MD integrator.
+One monomer / lattice site has a fixed linear length (1 site = 1 kb), and every
+tick both cohesin legs step one site, so the loop grows ``2 * bp_per_site`` of
+DNA per tick. With the total loop-extrusion speed ``v_cohesin`` (Yang & Hansen
+2024: 125 bp/s) the wall-clock duration of one tick is::
 
-    tick_seconds = md_steps_per_block * 0.0063
+    tick_seconds = 2 * bp_per_site / v_cohesin = 2000 / 125 = 16.0 s
 
-For the calibrated config (md_steps_per_block=2540) that is 16.0 s/tick.
+This is independent of ``polymer.md_steps_per_block``: that knob sets only the
+3D MD clock (how many integrator steps map to one tick), not biological time.
+Deriving seconds from MD steps (``md_steps_per_block * 0.0063``) is the integrator
+bookkeeping route and is deliberately NOT used here -- the doc warns the
+femtosecond/MD-step labels are arbitrary and only the cohesin-speed ratio is
+physical.
 
 Nascent-RNA abundance
 ---------------------
@@ -46,9 +53,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from polychrom.pipelines.loop_extrusion import lef as lef_stage  # noqa: E402
 from polychrom.pipelines.loop_extrusion.config import load_config  # noqa: E402
 
-# Hansen & Yang 2024 Suppl. Box 1: MSD-calibrated MD integrator step duration
-# for error_tol=0.01, collision_rate=1, density=0.2 (the polychrom setup used
-# throughout this pipeline).
+# Cohesin clock (the physical handle): a monomer/site is 1 kb of DNA, both legs
+# step one site per tick, so the loop grows 2*BP_PER_SITE per tick at the total
+# extrusion speed V_COHESIN_BPS (Yang & Hansen 2024). tick = 2*1000/125 = 16 s.
+BP_PER_SITE = 1000        # monomer linear length: 1 site = 1 kb (modeling choice)
+V_COHESIN_BPS = 125       # total loop-growth speed in bp/s (Yang & Hansen 2024)
+# MSD-calibrated MD step duration -- 3D integrator bookkeeping only, NOT used for
+# biological time (kept for the optional 3D cross-check).
 MD_STEP_SECONDS = 0.0063
 STATE_NAMES = {0: "POISED", 1: "PAUSED", 2: "ELONGATING", 3: "TERMINATING",
                4: "STALLED"}
@@ -74,7 +85,9 @@ def ensure_h5(cfg, h5_path: Path) -> None:
 
 
 def tick_seconds(cfg) -> float:
-    return cfg.polymer.md_steps_per_block * MD_STEP_SECONDS
+    # Cohesin clock: the loop grows 2*BP_PER_SITE per tick (both legs step one
+    # 1-kb monomer). md_steps_per_block sets only the 3D MD clock, not 1D time.
+    return 2.0 * BP_PER_SITE / V_COHESIN_BPS   # = 16.0 s, md-step-independent
 
 
 def measure_per_gene(h5_path: Path, cfg) -> Tuple[List[dict], Dict]:
@@ -200,7 +213,7 @@ def main(argv: List[str]) -> int:
     print(f"# run: {h5_path}")
     print(f"# config: {argv[1]}")
     print(f"# T = {meta['T']} ticks | tick = {ts:.2f} s "
-          f"(md_steps_per_block={cfg.polymer.md_steps_per_block} x {MD_STEP_SECONDS} s)")
+          f"(cohesin clock: 2x{BP_PER_SITE} bp / {V_COHESIN_BPS} bp/s)")
     print(f"# total simulated time = {tot_s/3600:.2f} h "
           f"({tot_s/3600/24:.2f} days) | chains = {meta['num_chains']}")
     print()
