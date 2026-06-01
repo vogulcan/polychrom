@@ -72,10 +72,19 @@ def band_mean(mids, cp, lo, hi):
     return float(cp[m].mean()) if m.any() else float("nan")
 
 
-def run_condition(cfg, lef_path, combo_dir, density, confk):
+def run_condition(cfg, lef_path, combo_dir, density, confk, collision, mode):
     fb = cfg.polymer.plugins.force_builder.kwargs
-    fb["confinement_density"] = float(density)
-    fb["confinement_k"] = float(confk)
+    cfg.polymer.collision_rate = float(collision)
+    if mode == "pbc":
+        # reference-style: periodic box (sized by density), no spherical wall
+        cfg.polymer.pbc = True
+        cfg.polymer.density = float(density)
+        fb["confine"] = False
+    else:  # sphere: current-style per-chain spherical confinement
+        cfg.polymer.pbc = False
+        fb["confine"] = True
+        fb["confinement_density"] = float(density)
+        fb["confinement_k"] = float(confk)
     cfg.polymer.lef_positions_path = str(lef_path)
     cfg.polymer.output_folder = str(combo_dir)
     polymer_stage.run(cfg.polymer)
@@ -88,6 +97,10 @@ def main(argv=None):
     ap.add_argument("--out", default="runs/grid_conf")
     ap.add_argument("--density", type=float, nargs="+", default=[0.05, 0.1, 0.2])
     ap.add_argument("--confk", type=float, nargs="+", default=[1.0, 5.0])
+    ap.add_argument("--collision", type=float, nargs="+", default=[1.0],
+                    help="collision_rate (friction); reference demo uses 0.03")
+    ap.add_argument("--mode", choices=["sphere", "pbc"], default="sphere",
+                    help="sphere=per-chain spherical wall (current); pbc=periodic box, no wall (reference)")
     ap.add_argument("--seeds", type=int, default=1)
     ap.add_argument("--num-chains", type=int, default=None,
                     help="override config num_chains (default: keep config value)")
@@ -139,58 +152,65 @@ def main(argv=None):
             print(f"[grid] seed {s} {cond}: lef done "
                   f"({chain_length}x{num_chains} sites)")
 
-        # --- polymer grid: density x confinement_k, both conditions ---
+        # --- polymer grid: density x confinement_k x collision_rate ---
         for dens in args.density:
             for ck in args.confk:
-                ps = {}
-                t = time.time()
-                for cond in conds:
-                    cdir = root / f"seed{s}" / f"d{dens:g}_k{ck:g}_{cond}"
-                    run_condition(cfgs[cond], lef_paths[cond], cdir, dens, ck)
-                    mids, cp, nconf = ps_curve(str(cdir), chain_length, num_chains, args.cutoff)
-                    ps[cond] = (mids, cp)
-                mids = ps["ON"][0]
-                on_s = band_mean(mids, ps["ON"][1], args.short_lo, args.short_hi)
-                off_s = band_mean(mids, ps["OFF"][1], args.short_lo, args.short_hi)
-                on_t = band_mean(mids, ps["ON"][1], args.tad_lo, args.tad_hi)
-                off_t = band_mean(mids, ps["OFF"][1], args.tad_lo, args.tad_hi)
-                fold_short = off_s / on_s
-                fold_tad = off_t / on_t
-                sep = fold_tad - fold_short
-                err = abs(fold_short - args.target_short) + abs(fold_tad - args.target_tad)
-                rec = {"density": dens, "confk": ck, "seed": s,
-                       "fold_short": fold_short, "fold_tad": fold_tad,
-                       "crossover_sep": sep, "target_err": err,
-                       "seconds": round(time.time() - t, 1)}
-                raw.append(rec)
-                print(f"[grid] d={dens:g} k={ck:g}  {rec['seconds']:5.0f}s  "
-                      f"fold_short={fold_short:.3f} fold_tad={fold_tad:.3f} "
-                      f"sep={sep:+.3f} err={err:.3f}")
+                for coll in args.collision:
+                    ps = {}
+                    t = time.time()
+                    for cond in conds:
+                        cdir = (root / f"seed{s}" /
+                                f"{args.mode}_d{dens:g}_k{ck:g}_c{coll:g}_{cond}")
+                        run_condition(cfgs[cond], lef_paths[cond], cdir,
+                                      dens, ck, coll, args.mode)
+                        mids, cp, nconf = ps_curve(str(cdir), chain_length, num_chains, args.cutoff)
+                        ps[cond] = (mids, cp)
+                    mids = ps["ON"][0]
+                    on_s = band_mean(mids, ps["ON"][1], args.short_lo, args.short_hi)
+                    off_s = band_mean(mids, ps["OFF"][1], args.short_lo, args.short_hi)
+                    on_t = band_mean(mids, ps["ON"][1], args.tad_lo, args.tad_hi)
+                    off_t = band_mean(mids, ps["OFF"][1], args.tad_lo, args.tad_hi)
+                    fold_short = off_s / on_s
+                    fold_tad = off_t / on_t
+                    sep = fold_tad - fold_short
+                    err = abs(fold_short - args.target_short) + abs(fold_tad - args.target_tad)
+                    rec = {"mode": args.mode, "density": dens, "confk": ck,
+                           "collision": coll, "seed": s,
+                           "fold_short": fold_short, "fold_tad": fold_tad,
+                           "crossover_sep": sep, "target_err": err,
+                           "seconds": round(time.time() - t, 1)}
+                    raw.append(rec)
+                    print(f"[grid] {args.mode} d={dens:g} k={ck:g} coll={coll:g}  "
+                          f"{rec['seconds']:5.0f}s  fold_short={fold_short:.3f} "
+                          f"fold_tad={fold_tad:.3f} sep={sep:+.3f} err={err:.3f}")
 
     root.mkdir(parents=True, exist_ok=True)
     (root / "grid_results_raw.json").write_text(json.dumps(raw, indent=2))
 
     # aggregate over seeds
-    def agg(d, k, metric):
-        vals = [r[metric] for r in raw if r["density"] == d and r["confk"] == k]
+    def agg(d, k, coll, metric):
+        vals = [r[metric] for r in raw if r["density"] == d
+                and r["confk"] == k and r["collision"] == coll]
         a = np.asarray(vals, float)
         return a.mean(), (a.std(ddof=1) / np.sqrt(a.size) if a.size > 1 else 0.0)
 
-    print("\n=== OFF/ON fold-change  (target: short~0.90, TAD~1.15) ===")
-    print(f"{'dens':>6} {'k':>5} {'fold_short':>11} {'fold_tad':>10} "
+    print(f"\n=== OFF/ON fold-change [mode={args.mode}]  (target: short~0.90, TAD~1.15) ===")
+    print(f"{'dens':>6} {'k':>5} {'coll':>6} {'fold_short':>11} {'fold_tad':>10} "
           f"{'crossover':>10} {'err':>7}")
     best = None
     for d in args.density:
         for k in args.confk:
-            fs, _ = agg(d, k, "fold_short")
-            ft, _ = agg(d, k, "fold_tad")
-            sep, _ = agg(d, k, "crossover_sep")
-            er, _ = agg(d, k, "target_err")
-            print(f"{d:>6g} {k:>5g} {fs:>11.3f} {ft:>10.3f} {sep:>+10.3f} {er:>7.3f}")
-            if best is None or er < best[-1]:
-                best = (d, k, fs, ft, er)
+            for coll in args.collision:
+                fs, _ = agg(d, k, coll, "fold_short")
+                ft, _ = agg(d, k, coll, "fold_tad")
+                sep, _ = agg(d, k, coll, "crossover_sep")
+                er, _ = agg(d, k, coll, "target_err")
+                print(f"{d:>6g} {k:>5g} {coll:>6g} {fs:>11.3f} {ft:>10.3f} "
+                      f"{sep:>+10.3f} {er:>7.3f}")
+                if best is None or er < best[-1]:
+                    best = (d, k, coll, fs, ft, er)
     print(f"\n[grid] best by target_err: density={best[0]:g} k={best[1]:g} "
-          f"-> short={best[2]:.3f} tad={best[3]:.3f} err={best[4]:.3f}")
+          f"coll={best[2]:g} -> short={best[3]:.3f} tad={best[4]:.3f} err={best[5]:.3f}")
     print(f"[grid] {len(raw)} runs in {(time.time()-t0)/60:.1f} min -> {root}")
     return 0
 

@@ -180,6 +180,7 @@ def paper_force_builder(
     confinement_k: float = 5.0,
     restrict_nonbonded_to_chains: bool = False,
     confinement_per_chain: bool = False,
+    confine: bool = True,
 ) -> None:
     """Force kit from Nat. Rev. Mol. Cell Biol. supplementary box 1.
 
@@ -319,7 +320,7 @@ def paper_force_builder(
         )
     )
 
-    if confinement_per_chain:
+    if confine and confinement_per_chain:
         sim.add_force(
             _spherical_confinement_for_replicates(
                 sim,
@@ -329,7 +330,7 @@ def paper_force_builder(
                 k=confinement_k,
             )
         )
-    else:
+    elif confine:
         sim.add_force(
             forces.spherical_confinement(
                 sim,
