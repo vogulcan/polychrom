@@ -1,0 +1,1 @@
+PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extrusion.cli compare --cutoffs 2 --out runs/small_1_2 runs/config1_small runs/config2_small
