@@ -352,6 +352,41 @@ def insulation_boundary_strength(profile: np.ndarray, boundaries: List[int], win
     return out
 
 
+def aggregate_insulation(profile: np.ndarray, boundaries: List[int], half: int = 40) -> Dict[str, Any]:
+    """Aggregate (mean over boundaries) insulation profile centered at boundaries.
+
+    Stacks the +/-``half`` window of the full-chain insulation ``profile`` around
+    each boundary (offset 0 = boundary) and averages over boundaries. The central
+    dip relative to the flanks is the aggregate boundary-insulation score
+    (``dip_ratio`` = center / flank-mean; lower = stronger insulation). Boundaries
+    whose window falls outside the valid (non-NaN) profile range are skipped.
+    """
+    snips = []
+    for b in boundaries:
+        lo, hi = b - half, b + half + 1
+        if lo < 0 or hi > len(profile):
+            continue
+        seg = profile[lo:hi]
+        if np.isnan(seg).any():
+            continue
+        snips.append(seg)
+    if not snips:
+        return {"n": 0, "half": half, "offsets": [], "mean_profile": []}
+    mean_prof = np.vstack(snips).mean(axis=0)
+    center = float(mean_prof[half])
+    edge = max(half // 2, 1)
+    flank = float(np.concatenate([mean_prof[:edge], mean_prof[-edge:]]).mean())
+    return {
+        "n": len(snips),
+        "half": half,
+        "offsets": list(range(-half, half + 1)),
+        "mean_profile": [float(x) for x in mean_prof],
+        "center": center,
+        "flank_mean": flank,
+        "dip_ratio": float(center / flank) if flank > 0 else float("nan"),
+    }
+
+
 def tad_strength(m: np.ndarray, tads: List[Tuple[int, int]]) -> Dict[str, Any]:
     intra = [float(m[a:b, a:b].mean()) for a, b in tads]
     inter = []
@@ -556,6 +591,31 @@ def _plot_insulation(m: np.ndarray, windows: List[int], boundaries: List[int], o
     for k in range(n, len(axes)):
         axes[k].axis("off")
     axes[-1].set_xlabel("position (kb)")
+    fig.tight_layout()
+    fig.savefig(out, dpi=120)
+    plt.close(fig)
+
+
+def _plot_insulation_aggregate(m: np.ndarray, windows: List[int], boundaries: List[int],
+                               out: Path, half: int = 40) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    n = len(windows)
+    cols = min(3, n)
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 3.2 * rows), sharex=True)
+    axes = np.array(axes).reshape(-1)
+    for k, w in enumerate(windows):
+        agg = aggregate_insulation(insulation_profile(m, w), boundaries, half=half)
+        if agg["mean_profile"]:
+            axes[k].plot(agg["offsets"], agg["mean_profile"])
+        axes[k].axvline(0, color="k", ls=":", alpha=0.4)
+        axes[k].set_title(f"window={w} kb (n={agg['n']}, dip={agg.get('dip_ratio', float('nan')):.2f})")
+        axes[k].set_ylabel("mean insulation (raw)")
+    for k in range(n, len(axes)):
+        axes[k].axis("off")
+    axes[-1].set_xlabel("offset from boundary (kb)")
     fig.tight_layout()
     fig.savefig(out, dpi=120)
     plt.close(fig)
@@ -789,6 +849,10 @@ def run(cfg) -> Path:
                 str(w): insulation_boundary_strength(insulation_profile(m, w), boundaries, w)
                 for w in windows
             },
+            "insulation_aggregate": {
+                str(w): aggregate_insulation(insulation_profile(m, w), boundaries)
+                for w in windows
+            },
             "stripe_enrichment_per_boundary": {
                 str(b): stripe_enrichment(m, b) for b in boundaries
             },
@@ -796,6 +860,7 @@ def run(cfg) -> Path:
         metrics["3d"] = m3d
         _plot_ps(ps, paths.plots_dir / "Ps_3d.png", title="P(s) — 3D contact map")
         _plot_insulation(m, windows, boundaries, paths.plots_dir / "insulation_windows.png")
+        _plot_insulation_aggregate(m, windows, boundaries, paths.plots_dir / "insulation_aggregate.png")
         _plot_contact_map(m, annotate.from_lef_cfg(cfg.lef), paths.plots_dir / "contact_map.png")
         # Pile-ups (centered on each anchor type) -- obs and O/E, both ICE-balanced.
         anchor_groups: Dict[str, List[int]] = {"CTCF boundary": list(boundaries)}
@@ -880,6 +945,11 @@ def _write_report(metrics: Dict[str, Any], paths: QCPaths) -> None:
         lines.append("- insulation_boundary_strength (lower = stronger; per window):")
         for w, d in m3["insulation_boundary_strength"].items():
             lines.append(f"  - w={w}: {d}")
+        if "insulation_aggregate" in m3:
+            lines.append("- aggregate insulation centered at boundaries (dip_ratio = center/flank; lower = stronger):")
+            for w, d in m3["insulation_aggregate"].items():
+                dip = d.get("dip_ratio", float("nan"))
+                lines.append(f"  - w={w}: dip_ratio={dip:.3f} (n={d.get('n', 0)})")
     lines.append("\n## Plots")
     lines.append("- [loop_length.png](plots/loop_length.png)")
     lines.append("- [Ps_1d.png](plots/Ps_1d.png) -- 1D bridge-contact P(s)")
@@ -887,6 +957,7 @@ def _write_report(metrics: Dict[str, Any], paths: QCPaths) -> None:
         lines.append("- All 3D metrics use the **ICE-balanced** contact map.")
         lines.append("- [Ps_3d.png](plots/Ps_3d.png) -- 3D contact-map P(s)")
         lines.append("- [insulation_windows.png](plots/insulation_windows.png)")
+        lines.append("- [insulation_aggregate.png](plots/insulation_aggregate.png) -- aggregate insulation centered at boundaries")
         lines.append("- [contact_map.png](plots/contact_map.png)")
         lines.append("- [pileups_obs.png](plots/pileups_obs.png) -- observed pile-ups around CTCF / TSS / TES / lesions")
         lines.append("- [pileups_oe.png](plots/pileups_oe.png) -- observed/expected pile-ups (same anchors)")

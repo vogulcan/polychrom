@@ -38,7 +38,8 @@ from . import annotate
 from .config import resolve_plugin
 from .contacts import _effective_map_starts
 from .qc import (
-    anchor_set, asymmetry_index, boundary_crossing, boundary_crossing_stripes,
+    aggregate_insulation, anchor_set, asymmetry_index, boundary_crossing,
+    boundary_crossing_stripes,
     cohesin_at_lesion_flanks, cohesin_classification, cohesin_occupancy,
     corner_dot_intensities, insulation_boundary_strength, insulation_profile,
     lesion_metrics, loop_length_stats, observed_over_expected, pileup,
@@ -380,6 +381,10 @@ def _collect_3d(r: RunData) -> Optional[Dict[str, Any]]:
             str(w): insulation_boundary_strength(insulation_profile(m, w), r.boundaries, w)
             for w in windows
         },
+        "insulation_aggregate": {
+            str(w): aggregate_insulation(insulation_profile(m, w), r.boundaries)
+            for w in windows
+        },
         "stripe_enrichment_per_boundary": {
             str(b): stripe_enrichment(m, b) for b in r.boundaries
         },
@@ -469,6 +474,29 @@ def _plot_insulation(ma: np.ndarray, mb: np.ndarray, boundaries: List[int],
         ax.set_title(f"window={w} kb"); ax.set_ylabel("insulation (raw)")
         if k == 0: ax.legend(fontsize=8)
     axes[-1, -1].set_xlabel("position (kb)")
+    fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
+
+
+def _plot_insulation_aggregate(ma: np.ndarray, mb: np.ndarray, boundaries: List[int],
+                               la: str, lb: str, out: Path, half: int = 40) -> None:
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    windows = [5, 10, 20, 40, 80, 120]
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
+    for k, w in enumerate(windows):
+        ax = axes[k // 3][k % 3]
+        aa = aggregate_insulation(insulation_profile(ma, w), boundaries, half=half)
+        ab = aggregate_insulation(insulation_profile(mb, w), boundaries, half=half)
+        if aa["mean_profile"]:
+            ax.plot(aa["offsets"], aa["mean_profile"], label=la)
+        if ab["mean_profile"]:
+            ax.plot(ab["offsets"], ab["mean_profile"], label=lb)
+        ax.axvline(0, color="k", ls=":", alpha=0.4)
+        ax.set_title(f"window={w} kb (dip {la}={aa.get('dip_ratio', float('nan')):.2f}, "
+                     f"{lb}={ab.get('dip_ratio', float('nan')):.2f})")
+        ax.set_ylabel("mean insulation (raw)")
+        if k == 0: ax.legend(fontsize=8)
+    axes[-1, -1].set_xlabel("offset from boundary (kb)")
     fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
 
 
@@ -703,6 +731,8 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
                  title="P(s) — 3D contact map")
         _plot_insulation(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
                          plots / f"{plot_prefix}insulation_compare.png")
+        _plot_insulation_aggregate(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
+                                   plots / f"{plot_prefix}insulation_aggregate_compare.png")
         # Flyamer rescaled-TAD pile-up
         tp = _plot_tad_pileup_compare(
             a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe, a.tads,
@@ -760,6 +790,12 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
                     "right_enrichment_x": _fold(a_stripe.get("right_enrichment_x"),
                                                 b_stripe.get("right_enrichment_x")),
                 }
+        if "insulation_aggregate" in a3 and "insulation_aggregate" in b3:
+            folds["insulation_aggregate_dip"] = {
+                w: _fold(a3["insulation_aggregate"][w].get("dip_ratio"),
+                         b3["insulation_aggregate"][w].get("dip_ratio"))
+                for w in a3["insulation_aggregate"] if w in b3["insulation_aggregate"]
+            }
         if "tad_pileup_obs" in a3:
             folds["tad_strength_obs"] = _fold(a3["tad_pileup_obs"]["strength"],
                                                 b3["tad_pileup_obs"]["strength"])
@@ -1209,7 +1245,8 @@ def _write_report(m: Dict[str, Any], path: Path, la: str, lb: str,
                 )
     lines.append("\n## Plots")
     for fn in ("loop_length_compare.png", "Ps_1d_compare.png", "Ps_3d_compare.png",
-               "insulation_compare.png", "contact_map_compare.png", "tad_pileup_compare.png",
+               "insulation_compare.png", "insulation_aggregate_compare.png",
+               "contact_map_compare.png", "tad_pileup_compare.png",
                "anchor_pileups_compare_obs.png", "anchor_pileups_compare_oe.png"):
         prefixed = f"{plot_prefix}{fn}"
         if (path.parent / "plots" / prefixed).exists():
