@@ -303,7 +303,7 @@ def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=250, separati
     tad_positions: {tad_pos}
     boundary_strength:
 {bstr_block}
-    default_boundary_strength: 0.60
+    default_boundary_strength: 1.0
     release_prob: 0.0
     include_chromosome_ends: true
     lifetime_rnapii_stalled: {lifetime}
@@ -361,9 +361,9 @@ polymer:
   seed: 2042
   density: 0.2
   pbc: false
-  md_steps_per_block: 1000
+  md_steps_per_block: 5000
   save_every_blocks: 1
-  restart_every_blocks: 1000
+  restart_every_blocks: 5000
   initial_relaxation_steps: {relax}   # scales with locus size
   pre_recording_steps: {prerec}
   smc_bond_wiggle: 0.1
@@ -433,15 +433,13 @@ def main():
                     help="dense-region TAD spacing endpoint (kb); realized dense median is a bit higher")
     ap.add_argument("--long-spacing", type=float, default=LONG_SPACING,
                     help="sparse-region TAD spacing endpoint (kb); realized sparse median is a bit lower")
-    ap.add_argument("--lifetime", type=int, default=250,
-                    help="cohesin lifetime (steps); residence ~16.7 min at ~4 s/tick "
-                         "(15-25 min window, Hansen 2017 / PMC12695666). Unobstructed loop "
-                         "=2*lifetime=500 kb, but collisions cap effective loops to ~150-200 kb "
-                         "at the default density. lifetime_ctcf=4x this")
-    ap.add_argument("--separation", type=int, default=120,
-                    help="sites per cohesin; 120 kb = 8.3/Mb, between Rao 2014 loop density "
-                         "(~6/Mb) and living-cell extruding density (12-18/Mb, PMC12695666). "
-                         "Primary insulation lever -- denser cohesin completes the bridging chain")
+    ap.add_argument("--lifetime", type=int, default=375,
+                    help="cohesin lifetime (steps), 4 s/tick, 25 min. Also, cohesin extrusion speed 0.5 kb/second")
+    ap.add_argument("--separation", type=int, default=240,
+                    help="sites per cohesin, e.g separation=240 kb -> 4.2 cohesin/Mb)")
+    ap.add_argument("--bstr-mult", type=float, default=1.5,
+                    help="config3 = config2 with all boundary strengths X times larger")
+
     args = ap.parse_args()
     CHAIN = int(args.chain)
     rng = np.random.default_rng(args.seed)
@@ -468,6 +466,10 @@ def main():
     sfx = args.suffix
     (od / f"config1_{sfx}.yaml").write_text(build(True, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation))
     (od / f"config2_{sfx}.yaml").write_text(build(False, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation))
+    # config3 = byte-identical to config2 (txn OFF) except every boundary strength is
+    # X times larger (--bstr-mult). Stronger insulation, same domain skeleton/genes.
+    bstrength_x = np.round(np.minimum(bstrength * args.bstr_mult, 1.0), 2)
+    (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, args.num_chains, args.lifetime, args.separation))
     # per-monomer transcription "ratio" (one value per site, 0..1): every monomer in
     # a TAD inherits that TAD's transcription level, so high-tx TADs -> high ratio,
     # low-tx TADs -> low ratio. Authored for one chain (length CHAIN); the simulation
@@ -500,7 +502,8 @@ def main():
           f">100kb={100*np.mean(np.array(lens)>100):.0f}%")
     print(f"E-P genes: {sum(1 for g in genes if g.get('enhancers'))}  enh/EPgene mean={np.mean([n for n in nenh if n]) if any(nenh) else 0:.1f}")
     print(f"genes/TAD: min={min(perTAD)} median={int(np.median(perTAD))} max={max(perTAD)}")
-    print(f"wrote {od}/config1_{sfx}.yaml , config2_{sfx}.yaml")
+    print(f"  config3 boundary_strength (x{args.bstr_mult:g}): min={bstrength_x.min():.2f} median={np.median(bstrength_x):.2f} max={bstrength_x.max():.2f}")
+    print(f"wrote {od}/config1_{sfx}.yaml , config2_{sfx}.yaml , config3_{sfx}.yaml")
 
 
 if __name__ == "__main__":

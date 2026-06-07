@@ -108,12 +108,14 @@ def _apply_convergent_tads(
             left_site = chain_offset + start
             right_site = chain_offset + end - 1
             if include_chromosome_ends or start != 0:
-                args["ctcfCapture"][-1][left_site] = _strength_at(
-                    boundary_strength, start, default_boundary_strength)
+                args["ctcfCapture"][-1][left_site] = (
+                    1.0 if start == 0
+                    else _strength_at(boundary_strength, start, default_boundary_strength))
                 args["ctcfRelease"][-1][left_site] = float(release_prob)
             if include_chromosome_ends or end != cfg.chain_length:
-                args["ctcfCapture"][1][right_site] = _strength_at(
-                    boundary_strength, end, default_boundary_strength)
+                args["ctcfCapture"][1][right_site] = (
+                    1.0 if end == cfg.chain_length
+                    else _strength_at(boundary_strength, end, default_boundary_strength))
                 args["ctcfRelease"][1][right_site] = float(release_prob)
 
 
