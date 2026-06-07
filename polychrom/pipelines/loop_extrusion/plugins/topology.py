@@ -162,18 +162,40 @@ def _set_loading_sites(
     loading_window: int,
     target_enhancers: bool,
     target_tss: bool,
+    weight_by_activity: bool = True,
 ) -> None:
     """Populate ``args`` with targeted cohesin-loading sites (enhancers/TSS).
+
+    Each site carries a loading WEIGHT, exposed as a normalized probability in
+    ``args["loading_probs"]``. With ``weight_by_activity`` (default) the weight
+    is the owning gene's *productive*-transcription rate
+    (``initiation_prob * pause_release_prob``), so cohesin loads preferentially
+    at ACTIVE enhancers/promoters -- matching NIPBL/MAU2 recruitment to active
+    elements -- rather than uniformly across every enhancer. Poised/silent loci
+    (e.g. developmental enhancers) keep their *regulatory* enhancers but
+    contribute little *loading*. Without it every site weighs 1.0 (uniform),
+    reproducing the legacy behaviour; uniform-kinetics genes (all probs 1.0)
+    are unaffected either way.
 
     Consumed by ``lef_dynamics.load_targeted``. ``targeted_load_prob == 0``
     (default) leaves loading uniform even if this is called.
     """
-    sites: set = set()
-    if target_enhancers:
-        sites |= {e for g in gene_objs for e in g.enhancers}
-    if target_tss:
-        sites |= {g.tss for g in gene_objs}
-    args["loading_sites"] = sorted(int(s) for s in sites)
+    weights: Dict[int, float] = {}
+    for g in gene_objs:
+        w = float(g.initiation_prob * g.pause_release_prob) if weight_by_activity else 1.0
+        if target_enhancers:
+            for e in g.enhancers:
+                weights[int(e)] = weights.get(int(e), 0.0) + w
+        if target_tss:
+            weights[int(g.tss)] = weights.get(int(g.tss), 0.0) + w
+    sites = sorted(weights)
+    total = sum(weights[s] for s in sites)
+    args["loading_sites"] = sites
+    # Normalized sampling distribution (same order as ``loading_sites``); ``None``
+    # -> ``load_targeted`` falls back to a uniform pick over the sites.
+    args["loading_probs"] = (
+        [weights[s] / total for s in sites] if sites and total > 0 else None
+    )
     args["targeted_load_prob"] = float(targeted_load_prob)
     args["loading_window"] = int(loading_window)
 
@@ -238,6 +260,7 @@ def gene_aware_topology(
     loading_window: int = 2,
     target_enhancers: bool = True,
     target_tss: bool = True,
+    weight_loading_by_activity: bool = True,
     lesion_prob: float = 0.0,
     lesion_lifetime: int = 100,
     lesion_block_prob: float = 0.95,
@@ -310,6 +333,7 @@ def gene_aware_topology(
         loading_window=loading_window,
         target_enhancers=target_enhancers,
         target_tss=target_tss,
+        weight_by_activity=weight_loading_by_activity,
     )
     # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
     args["lesions"] = {}
@@ -353,6 +377,7 @@ def gene_aware_convergent_tad_topology(
     loading_window: int = 2,
     target_enhancers: bool = True,
     target_tss: bool = True,
+    weight_loading_by_activity: bool = True,
     lesion_prob: float = 0.0,
     lesion_lifetime: int = 100,
     lesion_block_prob: float = 0.95,
@@ -417,6 +442,7 @@ def gene_aware_convergent_tad_topology(
         loading_window=loading_window,
         target_enhancers=target_enhancers,
         target_tss=target_tss,
+        weight_by_activity=weight_loading_by_activity,
     )
     # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
     args["lesions"] = {}

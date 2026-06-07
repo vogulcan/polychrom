@@ -39,6 +39,17 @@ class ProgressMeter:
         self._last = 0.0
         self.n = 0
 
+    def start(self) -> None:
+        """Reset the clock to *now*.
+
+        Call once, right before the first measured iteration, so one-time setup
+        done after construction (energy minimization, relaxation, burn-in) is
+        excluded from the rate/ETA estimate. Without this, ``elapsed`` carries
+        that fixed overhead and the early ETA is inflated until it amortizes.
+        """
+        self._start = time.time()
+        self._last = 0.0
+
     def update(self, n: Optional[int] = None, extra: str = "") -> None:
         self.n = self.n + 1 if n is None else int(n)
         now = time.time()

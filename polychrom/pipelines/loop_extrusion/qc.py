@@ -44,6 +44,7 @@ def loop_length_stats(positions: np.ndarray, edges: List[int]) -> Dict[str, Any]
         "p90": float(np.percentile(sizes, 90)),
         "histogram_edges_kb": [int(e) for e in edges],
         "histogram_fraction": [float(x) for x in hist / max(hist.sum(), 1)],
+        "histogram_counts": [int(x) for x in hist],
     }
 
 
@@ -545,12 +546,20 @@ def _plot_loop_hist(stats: Dict, out: Path) -> None:
     import matplotlib.pyplot as plt
     edges = stats["histogram_edges_kb"]
     frac = stats["histogram_fraction"]
-    centers = [(edges[i] + edges[i + 1]) / 2 for i in range(len(frac))]
+    widths = [edges[i + 1] - edges[i] for i in range(len(frac))]
+    # Plot probability DENSITY (fraction per kb), not raw per-bin fraction. The
+    # bins are unequal width, so raw fraction makes the wide bins look tall and
+    # breaks the monotonic decay (e.g. the wide 200-300 / 500+ bins appear as
+    # bumps). Dividing by bin width gives a bin-width-independent distribution
+    # that decreases continuously, and renders the wide tail bin honestly small.
+    density = [f / w if w > 0 else 0.0 for f, w in zip(frac, widths)]
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(range(len(frac)), frac, tick_label=[f"{edges[i]}-{edges[i + 1]}" for i in range(len(frac))])
+    ax.bar(range(len(density)), density,
+           tick_label=[f"{edges[i]}-{edges[i + 1]}" for i in range(len(density))])
     ax.set_xlabel("loop length bin (kb)")
-    ax.set_ylabel("fraction")
+    ax.set_ylabel("fraction per kb (density)")
     ax.set_title("Cohesin loop length distribution")
+    ax.tick_params(axis="x", labelrotation=45)
     fig.tight_layout()
     fig.savefig(out, dpi=120)
     plt.close(fig)
@@ -772,7 +781,14 @@ def run(cfg) -> Path:
 
     metrics: Dict[str, Any] = {"chain_length": chain_length, "num_chains": num_chains}
     metrics["sanity_1d"] = sanity_1d(positions, chain_length, num_chains)
-    loop_edges = [e for e in [0, 50, 100, 150, 200, 300, 500] if e < chain_length] + [chain_length]
+    # Finer high-end bins so the tail is resolved instead of dumped into one
+    # giant 500..chain_length catch-all (was 500-15000 for a 15 kb chain). The
+    # final overflow bin still spans up to chain_length but holds few loops; the
+    # density-based plot renders it honestly small.
+    loop_edges = [
+        e for e in [0, 50, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000]
+        if e < chain_length
+    ] + [chain_length]
     metrics["loop_length"] = loop_length_stats(positions, edges=loop_edges)
     metrics["classification"] = cohesin_classification(positions_rel, anch)
     metrics["boundary_crossing"] = boundary_crossing(positions_rel, boundaries)

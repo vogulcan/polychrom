@@ -268,6 +268,10 @@ class ViewerConfig:
     inputs are needed beyond ``LEFPositions.h5``.
     """
 
+    # When False, the ``all`` pipeline run skips the viewer stage. Running the
+    # ``viewer`` subcommand explicitly always runs it regardless of this flag.
+    enabled: bool = True
+
     lef_positions_path: str = "trajectory/LEFPositions.h5"
     output_path: str = "trajectory/bridging_viewer.html"
 

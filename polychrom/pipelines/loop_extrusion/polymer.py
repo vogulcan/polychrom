@@ -354,6 +354,13 @@ def run(cfg: PolymerConfig) -> Path:
                 stepped_run(sim.integrator.step, cfg.pre_recording_steps,
                             "polymer:burn-in")
 
+            if iteration == 0:
+                # Start the recording clock now, after the one-time
+                # minimization/relaxation/burn-in above, so those fixed costs
+                # don't inflate the per-block rate and ETA. Per-init rebuild
+                # overhead (iterations >= 1) is recurring and stays counted.
+                block_meter.start()
+
             for i in range(cfg.restart_every_blocks):
                 if i % cfg.save_every_blocks == (cfg.save_every_blocks - 1):
                     sim.do_block(steps=cfg.md_steps_per_block)
@@ -368,7 +375,7 @@ def run(cfg: PolymerConfig) -> Path:
             data = sim.get_data()
             del sim
             reporter.blocks_only = True
-            time.sleep(0.2)
+            # time.sleep(0.2)
 
         block_meter.done()
         reporter.dump_data()

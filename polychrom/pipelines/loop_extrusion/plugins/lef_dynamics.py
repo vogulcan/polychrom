@@ -149,7 +149,15 @@ def load_targeted(cohesins: List[Cohesin], occupied: np.ndarray, args: Dict) -> 
     p = float(args.get("targeted_load_prob", 0.0))
     if sites and np.random.random() < p:
         window = int(args.get("loading_window", 2))
-        site = int(sites[np.random.randint(len(sites))])
+        # Activity-weighted pick (NIPBL prefers active enhancers/promoters); falls
+        # back to uniform when no weights were supplied.
+        probs = args.get("loading_probs")
+        idx = (
+            int(np.random.choice(len(sites), p=probs))
+            if probs is not None
+            else np.random.randint(len(sites))
+        )
+        site = int(sites[idx])
         # Search outward from the target: (site, site+1), then +/- offsets.
         # `_same_chain(a, site)` keeps the placement inside the target site's own
         # chain -- a site near a chain boundary must never spill the cohesin into

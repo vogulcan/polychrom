@@ -38,7 +38,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 from nascent_rna_abundance import (  # noqa: E402
-    aggregate_by_base, ensure_h5, measure_per_gene, resolve_h5,
+    V_COHESIN_BPS, aggregate_by_base, ensure_h5, measure_per_gene, resolve_h5,
 )
 
 # --------------------------------------------------------------------------- #
@@ -63,10 +63,12 @@ PALETTE = [                  # Okabe-Ito categorical (skip black)
 FONT = "Helvetica, Arial, sans-serif"
 CHAR_W = 5.4                 # approx advance @ 9px, for label-collision width
 
-# Hansen & Yang 2024 MSD calibration: 1 MD integrator step ~= 0.0063 s, and
-# 1 LEF tick == 1 MD block == md_steps_per_block steps (see config header /
-# scripts/nascent_rna_abundance.py). Lets us print per-gene kinetics in real time.
-MD_STEP_SECONDS = 0.0063
+# Real-time calibration is anchored to the *cohesin clock*, not the MD integrator
+# (see scripts/nascent_rna_abundance.py): both cohesin legs step one site per tick,
+# so the loop grows 2*bp_per_site of DNA per tick at the total loop-extrusion speed
+# V_COHESIN_BPS (Yang & Hansen 2024), giving tick_seconds = 2*bp_per_site/v_cohesin.
+# This is independent of md_steps_per_block, which sets only the arbitrary 3D MD
+# clock -- the femtosecond/MD-step labels are not physical biological time.
 
 
 def _palette(i: int) -> str:
@@ -78,9 +80,9 @@ def _gene_stats(cfg, bp_per_site: int) -> Tuple[List[dict], float]:
 
     Returns ``(rows, tick_seconds)``. Each row is a dict of display strings.
     No trajectory needed: rates come from the YAML gene specs converted to real
-    time via the tick calibration (``md_steps_per_block * 0.0063 s``).
+    time via the cohesin clock (``2 * bp_per_site / V_COHESIN_BPS``).
     """
-    tick_s = cfg.polymer.md_steps_per_block * MD_STEP_SECONDS
+    tick_s = 2.0 * bp_per_site / V_COHESIN_BPS
     kb_per_site = bp_per_site / 1000.0
     specs = cfg.lef.topology_kwargs.get("genes", []) or []
     rows: List[dict] = []
@@ -331,8 +333,8 @@ def build_svg(
         f"{lef_cfg.num_chains} chain(s) &#215; {chain_length} sites "
         f"({_fmt_kb(chain_length * bp_per_site)} @ {bp_per_site} bp/site) "
         f"&#183; {len(genes)} genes &#183; {len(tads)} TADs "
-        f"&#183; 1 tick = {tick_s:.0f} s ({cfg.polymer.md_steps_per_block}"
-        f"&#215;{MD_STEP_SECONDS}s)"
+        f"&#183; 1 tick = {tick_s:.0f} s (cohesin clock: "
+        f"2&#215;{bp_per_site} bp / {V_COHESIN_BPS} bp/s)"
     )
     P.append(
         f'<text x="{pad_l}" y="53" font-size="11" fill="{C_TEXT_MUTE}">{sub}</text>'

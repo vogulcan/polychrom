@@ -49,6 +49,13 @@ from .qc import (
 from .plugins.sampling import iterative_correction
 
 
+# Upper bound on the genomic separation (in bins/kb) used for the 3D P(s)
+# comparison, as a fraction of the contact-map size. The large-s tail is
+# dominated by a handful of long-range contacts and is too noisy to compare;
+# curves are truncated here before AUC-normalization. Tune to taste.
+PS_3D_S_MAX_FRAC = 0.25
+
+
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
@@ -202,7 +209,7 @@ def _collect_1d(r: RunData) -> Dict[str, Any]:
         "sanity": sanity_1d(r.positions, r.chain_length, r.num_chains),
         "loop_length": loop_length_stats(
             r.positions,
-            edges=[e for e in [0, 50, 100, 150, 200, 300, 500]
+            edges=[e for e in [0, 50, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000]
                    if e < r.chain_length] + [r.chain_length]),
         "classification": cohesin_classification(r.positions, anch),
         "boundary_crossing": boundary_crossing(r.positions, r.boundaries),
@@ -426,33 +433,71 @@ def _pabs(arr: np.ndarray, p: float = 99.0) -> float:
     return float(np.percentile(a, p)) if a.size else 1.0
 
 
+def _mask_central_diags(mat: np.ndarray, k: int = 1) -> np.ndarray:
+    """Return a float copy of ``mat`` with the main and ``±k`` diagonals set to NaN."""
+    out = np.array(mat, dtype=float)
+    r, c = np.indices(out.shape)
+    out[np.abs(r - c) <= k] = np.nan
+    return out
+
+
 def _plot_loop_length(a: Dict, b: Dict, la: str, lb: str, out: Path) -> None:
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     ea = a["loop_length"]["histogram_edges_kb"]
     fa = a["loop_length"]["histogram_fraction"]
     fb = b["loop_length"]["histogram_fraction"]
+    ca = a["loop_length"].get("histogram_counts")
+    cb = b["loop_length"].get("histogram_counts")
     labels = [f"{ea[i]}-{ea[i + 1]}" for i in range(len(fa))]
     x = np.arange(len(fa)); w = 0.4
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(x - w / 2, fa, w, label=la); ax.bar(x + w / 2, fb, w, label=lb)
-    ax.set_xticks(x); ax.set_xticklabels(labels, rotation=30)
-    ax.set_ylabel("fraction"); ax.set_xlabel("loop bin (kb)")
-    ax.set_title(f"Loop length distribution: {la} vs {lb}")
-    ax.legend()
+    # Plot probability DENSITY (fraction per kb): bins are unequal width, so raw
+    # per-bin fraction makes wide bins look tall and breaks the monotonic decay.
+    # Dividing by bin width gives a bin-width-independent comparison.
+    widths = [ea[i + 1] - ea[i] for i in range(len(fa))]
+    da = [f / wd if wd > 0 else 0.0 for f, wd in zip(fa, widths)]
+    db = [f / wd if wd > 0 else 0.0 for f, wd in zip(fb, widths)]
+    panels = [("fraction per kb (density)", da, db)]
+    if ca is not None and cb is not None:
+        panels.append(("counts", ca, cb))
+    fig, axes = plt.subplots(1, len(panels), figsize=(8 * len(panels), 4), squeeze=False)
+    for ax, (ylabel, va, vb) in zip(axes[0], panels):
+        ax.bar(x - w / 2, va, w, label=la); ax.bar(x + w / 2, vb, w, label=lb)
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=30)
+        ax.set_ylabel(ylabel); ax.set_xlabel("loop bin (kb)")
+        ax.legend()
+    fig.suptitle(f"Loop length distribution: {la} vs {lb}")
     fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
 
 
 def _plot_ps(a: np.ndarray, b: np.ndarray, la: str, lb: str, out: Path,
-             title: str = "P(s)") -> None:
+             title: str = "P(s)", auc_normalize: bool = False,
+             s_max: Optional[int] = None) -> None:
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     n = min(len(a), len(b))
-    a, b = a[:n], b[:n]
+    if s_max is not None:
+        # Drop the noisy large-s tail before doing anything else, so it neither
+        # shows on the plot nor skews the AUC used for normalization.
+        n = min(n, int(s_max) + 1)
+    a, b = a[:n].astype(float), b[:n].astype(float)
     s = np.arange(1, n)
+    ylabel = "P(s)"
+    if auc_normalize:
+        # Normalize each curve to unit area under the curve (over the retained
+        # s-range) so the comparison reflects shape rather than overall scale.
+        _trapz = getattr(np, "trapezoid", None) or np.trapz
+        def _auc_norm(y: np.ndarray) -> np.ndarray:
+            area = _trapz(y[1:], s)
+            return y / area if area > 0 else y
+        a, b = _auc_norm(a), _auc_norm(b)
+        ylabel = "P(s) (AUC-normalized)"
+        title = f"{title} (AUC-normalized)"
+    if s_max is not None:
+        title = f"{title}, s≤{int(s_max)}"
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     ax[0].loglog(s, a[1:], label=la); ax[0].loglog(s, b[1:], label=lb)
-    ax[0].set_xlabel("s (kb)"); ax[0].set_ylabel("P(s)"); ax[0].set_title(title); ax[0].legend()
+    ax[0].set_xlabel("s (kb)"); ax[0].set_ylabel(ylabel); ax[0].set_title(title); ax[0].legend()
     fold = b[1:] / np.where(a[1:] > 0, a[1:], np.nan)
     ax[1].semilogx(s, fold); ax[1].axhline(1, color="k", ls="--")
     ax[1].set_xlabel("s (kb)"); ax[1].set_ylabel(f"{lb}/{la}")
@@ -572,31 +617,31 @@ def _plot_tad_pileup_compare(ma: np.ndarray, mb: np.ndarray, ea: np.ndarray, eb:
         ax.add_patch(Rectangle((30, 30), 30, 30, fill=False, ec="lime", lw=1.5))
         ax.add_patch(Rectangle((30, 0), 30, 30, fill=False, ec="cyan", lw=1.0, ls="--"))
         ax.add_patch(Rectangle((60, 30), 30, 30, fill=False, ec="cyan", lw=1.0, ls="--"))
-    # OBS row
-    obs_all = np.concatenate([np.log1p(ap_o).ravel(), np.log1p(aq_o).ravel()])
+    # OBS row — mask the main and ±1 diagonals (self-contacts dominate the scale)
+    obs_a_disp = _mask_central_diags(np.log1p(ap_o))
+    obs_b_disp = _mask_central_diags(np.log1p(aq_o))
+    obs_all = np.concatenate([obs_a_disp.ravel(), obs_b_disp.ravel()])
     lo, hi = _pclip(obs_all)
-    for col, (mat, label) in enumerate([(np.log1p(ap_o), la), (np.log1p(aq_o), lb)]):
+    for col, (mat, label) in enumerate([(obs_a_disp, la), (obs_b_disp, lb)]):
         ax = axes[0, col]
         im = ax.imshow(mat, cmap="inferno", vmin=lo, vmax=hi, origin="lower")
         plt.colorbar(im, ax=ax, fraction=.045); boxes(ax)
         ax.set_title(f"OBS log1p rescaled-TAD: {label}")
-    do = aq_o - ap_o; vm = _pabs(do)
+    do = _mask_central_diags(aq_o - ap_o); vm = _pabs(do)
     ax = axes[0, 2]; im = ax.imshow(do, cmap="bwr", vmin=-vm, vmax=vm, origin="lower")
     plt.colorbar(im, ax=ax, fraction=.045); boxes(ax)
     ax.set_title(f"OBS  {lb} − {la}")
-    # O/E row
-    oe_log = np.concatenate([
-        np.log2(np.clip(ap_e, 1e-3, None)).ravel(),
-        np.log2(np.clip(aq_e, 1e-3, None)).ravel(),
-    ])
+    # O/E row — mask the main and ±1 diagonals
+    oe_a_disp = _mask_central_diags(np.log2(np.clip(ap_e, 1e-3, None)))
+    oe_b_disp = _mask_central_diags(np.log2(np.clip(aq_e, 1e-3, None)))
+    oe_log = np.concatenate([oe_a_disp.ravel(), oe_b_disp.ravel()])
     ve = _pabs(oe_log)
-    for col, (mat, label) in enumerate([(np.log2(np.clip(ap_e, 1e-3, None)), la),
-                                         (np.log2(np.clip(aq_e, 1e-3, None)), lb)]):
+    for col, (mat, label) in enumerate([(oe_a_disp, la), (oe_b_disp, lb)]):
         ax = axes[1, col]
         im = ax.imshow(mat, cmap="bwr", vmin=-ve, vmax=ve, origin="lower")
         plt.colorbar(im, ax=ax, fraction=.045); boxes(ax)
         ax.set_title(f"O/E log2 rescaled-TAD: {label}")
-    de = aq_e - ap_e; vm = _pabs(de)
+    de = _mask_central_diags(aq_e - ap_e); vm = _pabs(de)
     ax = axes[1, 2]; im = ax.imshow(de, cmap="bwr", vmin=-vm, vmax=vm, origin="lower")
     plt.colorbar(im, ax=ax, fraction=.045); boxes(ax)
     ax.set_title(f"O/E  {lb} − {la}")
@@ -728,7 +773,8 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
                                                    span=a.cmap_obs.shape[0]))
         _plot_ps(ps_curve(a.cmap_obs), ps_curve(b.cmap_obs),
                  label_a, label_b, plots / f"{plot_prefix}Ps_3d_compare.png",
-                 title="P(s) — 3D contact map")
+                 title="P(s) — 3D contact map", auc_normalize=True,
+                 s_max=int(min(a.cmap_obs.shape[0], b.cmap_obs.shape[0]) * PS_3D_S_MAX_FRAC))
         _plot_insulation(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
                          plots / f"{plot_prefix}insulation_compare.png")
         _plot_insulation_aggregate(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,

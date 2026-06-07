@@ -177,10 +177,12 @@ def main(argv: list[str] | None = None) -> int:
         out = lef_stage.run(cfg.lef)
         print(f"[lef]      wrote {out}")
     # Inspect the 1D dynamics before paying for 3D MD.
-    if args.stage in ("viewer", "all"):
+    if args.stage == "viewer" or (args.stage == "all" and cfg.viewer.enabled):
         from . import viewer as viewer_stage
         out = viewer_stage.run(cfg.viewer, cfg.lef)
         print(f"[viewer]   wrote {out}")
+    elif args.stage == "all":
+        print("[viewer]   skipped (viewer.enabled = false)")
     if args.stage in ("polymer", "all"):
         from . import polymer as polymer_stage
         out = polymer_stage.run(cfg.polymer)

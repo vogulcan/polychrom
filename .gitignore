@@ -18,3 +18,5 @@ references
 .claude
 CLAUDE.md
 trajectory
+configs_test
+runs_test
