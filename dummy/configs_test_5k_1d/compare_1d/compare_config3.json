@@ -1,0 +1,330 @@
+{
+  "labels": {
+    "A": "config2",
+    "B": "config3"
+  },
+  "cutoff": null,
+  "config2": {
+    "1d": {
+      "sanity": {
+        "n_frames": 10000,
+        "n_lefs": 20,
+        "any_nan": false,
+        "any_out_of_range": false,
+        "any_cross_chain_leg": false
+      },
+      "loop_length": {
+        "mean": 141.03686,
+        "median": 97.0,
+        "p10": 19.0,
+        "p90": 312.0,
+        "histogram_edges_kb": [
+          0,
+          50,
+          100,
+          150,
+          200,
+          300,
+          500,
+          750,
+          1000,
+          1500,
+          2000,
+          3000,
+          5000
+        ],
+        "histogram_fraction": [
+          0.28583,
+          0.22626,
+          0.159025,
+          0.105,
+          0.114225,
+          0.07341,
+          0.02801,
+          0.007125,
+          0.001115,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "histogram_counts": [
+          57166,
+          45252,
+          31805,
+          21000,
+          22845,
+          14682,
+          5602,
+          1425,
+          223,
+          0,
+          0,
+          0
+        ]
+      },
+      "classification": {
+        "corner_pct": 0.059500000000000004,
+        "stripe_pct": 16.2545,
+        "free_pct": 83.686
+      },
+      "boundary_crossing": {
+        "1309": 0.3536,
+        "1849": 0.4318,
+        "2624": 0.2451,
+        "3411": 0.2904,
+        "4306": 0.3256,
+        "mean": 0.32930000000000004
+      },
+      "boundary_crossing_stripes": {
+        "1309": {
+          "crossing_frame_fraction": 0.3536,
+          "stripe_crossing_frame_fraction": 0.0078,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.347,
+          "stripe_share_of_crossing_frames": 0.022058823529411766,
+          "crossing_event_count": 3824,
+          "stripe_crossing_event_pct": 2.0397489539748954,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 97.9602510460251
+        },
+        "1849": {
+          "crossing_frame_fraction": 0.4318,
+          "stripe_crossing_frame_fraction": 0.018,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.4223,
+          "stripe_share_of_crossing_frames": 0.041685965724872626,
+          "crossing_event_count": 5378,
+          "stripe_crossing_event_pct": 3.34696913350688,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 96.65303086649313
+        },
+        "2624": {
+          "crossing_frame_fraction": 0.2451,
+          "stripe_crossing_frame_fraction": 0.0066,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.2399,
+          "stripe_share_of_crossing_frames": 0.02692778457772338,
+          "crossing_event_count": 2876,
+          "stripe_crossing_event_pct": 2.2948539638386647,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 97.70514603616134
+        },
+        "3411": {
+          "crossing_frame_fraction": 0.2904,
+          "stripe_crossing_frame_fraction": 0.0073,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.2845,
+          "stripe_share_of_crossing_frames": 0.025137741046831957,
+          "crossing_event_count": 3280,
+          "stripe_crossing_event_pct": 2.225609756097561,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 97.77439024390245
+        },
+        "4306": {
+          "crossing_frame_fraction": 0.3256,
+          "stripe_crossing_frame_fraction": 0.0063,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.321,
+          "stripe_share_of_crossing_frames": 0.01934889434889435,
+          "crossing_event_count": 3604,
+          "stripe_crossing_event_pct": 1.7480577136514983,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 98.2519422863485
+        },
+        "mean": {
+          "crossing_frame_fraction": 0.32930000000000004,
+          "stripe_crossing_frame_fraction": 0.0092,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.32293999999999995,
+          "stripe_share_of_crossing_frames": 0.027031841845546817,
+          "crossing_event_count": 18962,
+          "stripe_crossing_event_pct": 2.4259044404598673,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 97.57409555954013
+        }
+      },
+      "asymmetry_index": 0.04175685121802276,
+      "cohesin_at_ctcf_anchor_sum": 3.2747000000000006,
+      "ps_1d": {
+        "ps_at": {
+          "5": 4.798798798798799e-05,
+          "10": 2.905811623246493e-06,
+          "20": 6.5060240963855425e-06,
+          "50": 8.484848484848485e-06,
+          "100": 7.836734693877551e-06,
+          "150": 6.43298969072165e-06,
+          "200": 4.708333333333334e-06,
+          "300": 2.595744680851064e-06,
+          "500": 6.222222222222223e-07
+        }
+      },
+      "cohesin_at_gene_bodies_sum": 25.849400000000006
+    }
+  },
+  "config3": {
+    "1d": {
+      "sanity": {
+        "n_frames": 10000,
+        "n_lefs": 20,
+        "any_nan": false,
+        "any_out_of_range": false,
+        "any_cross_chain_leg": false
+      },
+      "loop_length": {
+        "mean": 141.72766,
+        "median": 101.0,
+        "p10": 19.0,
+        "p90": 323.0,
+        "histogram_edges_kb": [
+          0,
+          50,
+          100,
+          150,
+          200,
+          300,
+          500,
+          750,
+          1000,
+          1500,
+          2000,
+          3000,
+          5000
+        ],
+        "histogram_fraction": [
+          0.26887,
+          0.226445,
+          0.15333,
+          0.109905,
+          0.125,
+          0.08865,
+          0.026495,
+          0.001305,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "histogram_counts": [
+          53774,
+          45289,
+          30666,
+          21981,
+          25000,
+          17730,
+          5299,
+          261,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "classification": {
+        "corner_pct": 0.083,
+        "stripe_pct": 21.313499999999998,
+        "free_pct": 78.6035
+      },
+      "boundary_crossing": {
+        "1309": 0.1616,
+        "1849": 0.2415,
+        "2624": 0.2396,
+        "3411": 0.1896,
+        "4306": 0.2443,
+        "mean": 0.21532
+      },
+      "boundary_crossing_stripes": {
+        "1309": {
+          "crossing_frame_fraction": 0.1616,
+          "stripe_crossing_frame_fraction": 0.0037,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.1586,
+          "stripe_share_of_crossing_frames": 0.022896039603960396,
+          "crossing_event_count": 1875,
+          "stripe_crossing_event_pct": 1.9733333333333334,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 98.02666666666667
+        },
+        "1849": {
+          "crossing_frame_fraction": 0.2415,
+          "stripe_crossing_frame_fraction": 0.0043,
+          "corner_crossing_frame_fraction": 0.0001,
+          "free_crossing_frame_fraction": 0.2377,
+          "stripe_share_of_crossing_frames": 0.01780538302277433,
+          "crossing_event_count": 2867,
+          "stripe_crossing_event_pct": 1.499825601674224,
+          "corner_crossing_event_pct": 0.03487966515521451,
+          "free_crossing_event_pct": 98.46529473317057
+        },
+        "2624": {
+          "crossing_frame_fraction": 0.2396,
+          "stripe_crossing_frame_fraction": 0.0078,
+          "corner_crossing_frame_fraction": 0.0001,
+          "free_crossing_frame_fraction": 0.2319,
+          "stripe_share_of_crossing_frames": 0.0325542570951586,
+          "crossing_event_count": 2441,
+          "stripe_crossing_event_pct": 3.195411716509627,
+          "corner_crossing_event_pct": 0.04096681687832855,
+          "free_crossing_event_pct": 96.76362146661205
+        },
+        "3411": {
+          "crossing_frame_fraction": 0.1896,
+          "stripe_crossing_frame_fraction": 0.0034,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.1866,
+          "stripe_share_of_crossing_frames": 0.017932489451476793,
+          "crossing_event_count": 2100,
+          "stripe_crossing_event_pct": 1.619047619047619,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 98.38095238095238
+        },
+        "4306": {
+          "crossing_frame_fraction": 0.2443,
+          "stripe_crossing_frame_fraction": 0.0078,
+          "corner_crossing_frame_fraction": 0.0,
+          "free_crossing_frame_fraction": 0.2371,
+          "stripe_share_of_crossing_frames": 0.03192795742939009,
+          "crossing_event_count": 2697,
+          "stripe_crossing_event_pct": 2.8921023359288096,
+          "corner_crossing_event_pct": 0.0,
+          "free_crossing_event_pct": 97.10789766407119
+        },
+        "mean": {
+          "crossing_frame_fraction": 0.21532,
+          "stripe_crossing_frame_fraction": 0.0054,
+          "corner_crossing_frame_fraction": 4e-05,
+          "free_crossing_frame_fraction": 0.21038,
+          "stripe_share_of_crossing_frames": 0.02462322532055204,
+          "crossing_event_count": 11980,
+          "stripe_crossing_event_pct": 2.2537562604340566,
+          "corner_crossing_event_pct": 0.01669449081803005,
+          "free_crossing_event_pct": 97.72954924874792
+        }
+      },
+      "asymmetry_index": 0.04339526593857806,
+      "cohesin_at_ctcf_anchor_sum": 4.2959000000000005,
+      "ps_1d": {
+        "ps_at": {
+          "5": 4.640640640640641e-05,
+          "10": 5.170340681362726e-06,
+          "20": 7.329317269076305e-06,
+          "50": 8.282828282828283e-06,
+          "100": 8.612244897959184e-06,
+          "150": 6.041237113402062e-06,
+          "200": 4.833333333333333e-06,
+          "300": 3.872340425531915e-06,
+          "500": 7.333333333333333e-07
+        }
+      },
+      "cohesin_at_gene_bodies_sum": 25.404300000000006
+    }
+  },
+  "folds": {
+    "loop_mean": 1.0048980103499183,
+    "cohesin_at_ctcf_anchor_sum": 1.3118453598802944,
+    "cohesin_at_gene_bodies_sum": 0.9827810316680464,
+    "corner_pct": 1.3949579831932772,
+    "stripe_pct": 1.3112368882463317,
+    "boundary_crossing_mean": 0.6538718493774673,
+    "boundary_crossing_stripe_share": 0.9108970621107872
+  }
+}

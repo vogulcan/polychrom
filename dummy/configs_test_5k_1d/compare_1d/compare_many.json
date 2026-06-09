@@ -1,0 +1,69 @@
+{
+  "baseline": "config2",
+  "comparisons": {
+    "config1": {
+      "json": "dummy/configs_test_5k_1d/compare_1d/compare_config1.json",
+      "report": "dummy/configs_test_5k_1d/compare_1d/compare_config1.md",
+      "plot_prefix": "config1_",
+      "folds": {
+        "loop_mean": 0.8960223944293713,
+        "cohesin_at_ctcf_anchor_sum": 0.8048676214615077,
+        "cohesin_at_gene_bodies_sum": 1.0453666235966792,
+        "corner_pct": 0.0,
+        "stripe_pct": 0.8107600972038513,
+        "boundary_crossing_mean": 0.9790464621925294,
+        "boundary_crossing_stripe_share": 1.1448202448056948
+      },
+      "top_line": {
+        "loop_mean": 0.8960223944293713,
+        "cohesin_at_ctcf_anchor_sum": 0.8048676214615077,
+        "cohesin_at_gene_bodies_sum": 1.0453666235966792,
+        "corner_pct": 0.0,
+        "global_anchored_stripe_pct": 0.8107600972038513,
+        "boundary_crossing_mean": 0.9790464621925294,
+        "boundary_crossing_stripe_share": 1.1448202448056948,
+        "tad_strength_obs_baseline": null,
+        "tad_strength_obs_comparison": null,
+        "tad_strength_obs": null,
+        "tad_strength_oe_baseline": null,
+        "tad_strength_oe_comparison": null,
+        "tad_strength_oe": null,
+        "tad_pileup_oe_crossing_stripe_contrast_delta": null,
+        "fountain_oe_score": null,
+        "fountain_oe_symmetry": null
+      }
+    },
+    "config3": {
+      "json": "dummy/configs_test_5k_1d/compare_1d/compare_config3.json",
+      "report": "dummy/configs_test_5k_1d/compare_1d/compare_config3.md",
+      "plot_prefix": "config3_",
+      "folds": {
+        "loop_mean": 1.0048980103499183,
+        "cohesin_at_ctcf_anchor_sum": 1.3118453598802944,
+        "cohesin_at_gene_bodies_sum": 0.9827810316680464,
+        "corner_pct": 1.3949579831932772,
+        "stripe_pct": 1.3112368882463317,
+        "boundary_crossing_mean": 0.6538718493774673,
+        "boundary_crossing_stripe_share": 0.9108970621107872
+      },
+      "top_line": {
+        "loop_mean": 1.0048980103499183,
+        "cohesin_at_ctcf_anchor_sum": 1.3118453598802944,
+        "cohesin_at_gene_bodies_sum": 0.9827810316680464,
+        "corner_pct": 1.3949579831932772,
+        "global_anchored_stripe_pct": 1.3112368882463317,
+        "boundary_crossing_mean": 0.6538718493774673,
+        "boundary_crossing_stripe_share": 0.9108970621107872,
+        "tad_strength_obs_baseline": null,
+        "tad_strength_obs_comparison": null,
+        "tad_strength_obs": null,
+        "tad_strength_oe_baseline": null,
+        "tad_strength_oe_comparison": null,
+        "tad_strength_oe": null,
+        "tad_pileup_oe_crossing_stripe_contrast_delta": null,
+        "fountain_oe_score": null,
+        "fountain_oe_symmetry": null
+      }
+    }
+  }
+}

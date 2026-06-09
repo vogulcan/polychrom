@@ -1,0 +1,118 @@
+{
+  "base": "dummy/realistic20s_30k_20k",
+  "summaries": [
+    {
+      "label": "config1",
+      "frames": 20000,
+      "lefs_per_frame": 500.0,
+      "within_tad_lefs_per_frame": 465.51215,
+      "between_tad_lefs_per_frame": 34.48785,
+      "adjacent_between_tad_lefs_per_frame": 34.44265,
+      "nonadjacent_between_tad_lefs_per_frame": 0.0452,
+      "within_tad_lef_pct": 93.10243,
+      "between_tad_lef_pct": 6.89757,
+      "boundary_crossing_mean": 0.7265071428571428,
+      "boundary_crossing_event_count": 684512,
+      "boundary_crossing_events_per_frame": 34.2256,
+      "crossing_stripe_share": 0.04337445520799927,
+      "loop_span_mean": 118.9509955,
+      "loop_span_median": 84.0,
+      "loop_span_p90": 265.0,
+      "loop_span_p99": 553.0,
+      "loop_span_near_gene_mean": 121.69081614887585,
+      "loop_span_away_gene_mean": 105.07131808525996,
+      "lefs_near_gene_per_frame": 417.5721,
+      "lefs_at_boundary_anchor_per_frame": 34.7417,
+      "lefs_at_boundary_anchor_pct": 6.94834,
+      "rnapii": {
+        "frames_with_any_polii_pct": 100.0,
+        "mean_count_when_present": 1528.7547,
+        "max_simultaneous": 1666,
+        "state_mix_pct": {
+          "POISED": 1.0591202107179132,
+          "PAUSED": 29.848438078391517,
+          "ELONGATING": 22.572898712919738,
+          "TERMINATING": 27.023707596777953,
+          "STALLED": 19.49583540119288
+        },
+        "elongation_speed_sites_per_tick": 1.9910024304085907,
+        "elongation_speed_kb_per_min": 5.973007291225772
+      },
+      "rnapii_mean_count_all_frames": 1528.7547,
+      "rnapii_gene_body_pct": 100.0,
+      "rnapii_at_boundary_anchor_pct": 0.0,
+      "rnapii_state_counts": {
+        "0": 323827,
+        "1": 9126188,
+        "2": 6901685,
+        "3": 8262524,
+        "4": 5960870
+      }
+    },
+    {
+      "label": "config2",
+      "frames": 20000,
+      "lefs_per_frame": 500.0,
+      "within_tad_lefs_per_frame": 462.39375,
+      "between_tad_lefs_per_frame": 37.60625,
+      "adjacent_between_tad_lefs_per_frame": 37.58645,
+      "nonadjacent_between_tad_lefs_per_frame": 0.0198,
+      "within_tad_lef_pct": 92.47875,
+      "between_tad_lef_pct": 7.52125,
+      "boundary_crossing_mean": 0.7575267857142859,
+      "boundary_crossing_event_count": 746042,
+      "boundary_crossing_events_per_frame": 37.3021,
+      "crossing_stripe_share": 0.04388224113279531,
+      "loop_span_mean": 127.4783476,
+      "loop_span_median": 91.0,
+      "loop_span_p90": 283.0,
+      "loop_span_p99": 587.0,
+      "loop_span_near_gene_mean": 130.54700480157194,
+      "loop_span_away_gene_mean": 113.0865614674556,
+      "lefs_near_gene_per_frame": 412.12545,
+      "lefs_at_boundary_anchor_per_frame": 40.08905,
+      "lefs_at_boundary_anchor_pct": 8.01781
+    },
+    {
+      "label": "config3",
+      "frames": 20000,
+      "lefs_per_frame": 500.0,
+      "within_tad_lefs_per_frame": 471.8904,
+      "between_tad_lefs_per_frame": 28.1096,
+      "adjacent_between_tad_lefs_per_frame": 28.08215,
+      "nonadjacent_between_tad_lefs_per_frame": 0.02745,
+      "within_tad_lef_pct": 94.37808,
+      "between_tad_lef_pct": 5.621919999999999,
+      "boundary_crossing_mean": 0.6364428571428571,
+      "boundary_crossing_event_count": 558105,
+      "boundary_crossing_events_per_frame": 27.90525,
+      "crossing_stripe_share": 0.04017392558986928,
+      "loop_span_mean": 135.4626981,
+      "loop_span_median": 94.0,
+      "loop_span_p90": 302.0,
+      "loop_span_p99": 652.0,
+      "loop_span_near_gene_mean": 139.3901270423126,
+      "loop_span_away_gene_mean": 116.6354162985194,
+      "lefs_near_gene_per_frame": 413.70075,
+      "lefs_at_boundary_anchor_per_frame": 64.0013,
+      "lefs_at_boundary_anchor_pct": 12.80026
+    }
+  ],
+  "comparisons": {
+    "config3_vs_config2": {
+      "between_tad_lefs_fold": 0.7474714974239653,
+      "boundary_crossing_mean_fold": 0.8401588816991381,
+      "crossing_events_per_frame_fold": 0.7480879092598003,
+      "within_tad_lefs_delta": 9.496649999999988,
+      "loop_span_mean_delta": 7.984350500000005,
+      "anchor_lefs_fold": 1.5964783400953626
+    },
+    "config1_vs_config2": {
+      "between_tad_lefs_fold": 0.9170776134286189,
+      "boundary_crossing_mean_fold": 0.9590514243956482,
+      "crossing_events_per_frame_fold": 0.9175247506172574,
+      "within_tad_lefs_delta": 3.1184000000000083,
+      "loop_span_mean_delta": -8.527352100000002
+    }
+  }
+}

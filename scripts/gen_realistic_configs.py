@@ -16,26 +16,33 @@ Gene classes (per user's regulatory-architecture table):
   hk_const 45%  hk_high 10%  celltype 30%  developmental 15%
 
 config1 = txn ON, config2 = txn OFF (max_rnapii + 2 rnapii plugin slots);
-byte-identical otherwise. Deterministic (seeded). LEF kinetics (lifetime,
-separation, elongation rate) are retuned to in-vivo literature here:
-  * separation 120 kb  -> 8.3 cohesin/Mb, between Rao 2014 loop density (~6/Mb)
-    and living-cell extruding density (12-18/Mb; Nat Genet 2025, PMC12695666).
-    This is the PRIMARY insulation lever: a ~880 kb Dixon TAD then holds ~7
-    cohesins, enough to form the 2.5-3.7-loop SERIES that bridges anchors in vivo
-    (PMC12695666). Sparse cohesin (1/240 kb = 3 per TAD) barely meets the ~3 loops
-    needed, so the bridging chain rarely completes -> weak TADs.
-  * lifetime 250 ticks -> residence ~16.7 min (in the measured 15-25 min window,
-    Hansen 2017 / PMC12695666) at the wall-clock calibration below. Unobstructed
-    loop = 2*lifetime = 500 kb, but at this density collisions cap EFFECTIVE loops
-    to ~150-200 kb (lambda/d ~ 4, matching the in-vivo dense regime and the
-    190-340 kb effective processivity of PMC12695666). Loops still do NOT span the
-    750-1250 kb TADs -- the readout stays insulation, not corner dots (anchors are
-    in direct contact <1% of the time even in vivo; PMC12695666).
-  * Banigan 2023 cohesin:RNAP speed ratio 3-5x (elongation_step_prob 0.25).
-Wall-clock calibration (interpretation only, not a config knob): 1 leg = 1 site =
-1 kb/tick; in-vivo motor speed ~0.25 kb/s (Nat Genet 2025; in-vitro 0.5-1 kb/s,
-Davidson 2019) => 1 tick ~= 4 s. The MD block (variableLangevin) has no fixed
-seconds. Other MD params are preserved from the current configs.
+byte-identical otherwise. Deterministic (seeded). See references/parameter_plan.md
+for the full cohesin / RNAPII / interference table.
+
+CALIBRATION: 1 tick = 4 s. A cohesin extrudes 2 monomers/tick (both legs) = 2 kb/tick
+=> loop-growth 0.5 kb/s (Davidson 2019 in-vitro; per-leg 0.25 kb/s). Key identity:
+bare processivity lambda = 2*lifetime (kb) is calibration-free; the tick only sets
+speed (=1 kb/tick per leg) and residence (=lifetime*4 s).
+
+COHESIN:
+  * separation 180 -> 5.6 cohesin/Mb (Rao 2014 ~6/Mb). PRIMARY lever on effective loop
+    size / P(s) turning point: in the dense regime effective loop ~= separation.
+  * lifetime 300 -> free/extruding residence 20 min (Hansen 2017 15-25 min); bare
+    lambda = 600 kb > separation, so loops saturate the dense regime. The OBSERVABLE
+    is the collision-capped effective loop (~180 kb, matching Rao 185 / Nat Genet
+    190-340), NOT bare lambda. lifetime_ctcf = 4*lifetime (anchored pool, kept at 4x).
+  * loading ~98% uniform (targeted_load_prob 0.02). target_tss FALSE (Banigan 2023:
+    no preferential TSS loading); target_enhancers TRUE (Kagey 2010 / Fursova 2024).
+    cohesin@genes is barrier-driven (RNAPII pinning, Busslinger 2017), not loading.
+
+RNAPII (per gene): load_prob 0.015 (~Banigan k_load), pause_release <=0.10 (40-130 s
+  promoter pause), elongation_step_prob 0.20 (0.05 kb/s = 3 kb/min; cohesin 5x faster),
+  termination_prob 0.03 (~130 s 3' dwell -> 3' barrier that relocalizes cohesin).
+
+INTERFERENCE: rnapii_headon_push_prob 0.85 + rnapii_stall_prob 0.15 (RNAP wins head-on,
+  stall force 10 vs 0.1-1 pN; effective head-on push ~0.72). block_prob 0.95 => bypass
+  0.05/tick ~ Banigan k_bypass 0.01/s. lifetime_rnapii_stalled = lifetime/6 (50 ticks =
+  200 s ~ t_bypass; Pol II evicts cohesin -- was =lifetime, no eviction). MD params preserved.
 """
 from __future__ import annotations
 import argparse
@@ -59,12 +66,13 @@ LONG_TAD_KB  = 1250.0   # TARGET median size of sparse / long TADs
 SHORT_SPACING = 600.0
 LONG_SPACING  = 1450.0
 
-# class -> draw ranges
+# class -> draw ranges. prel (pause_release_prob) capped <=0.10: at 4 s/tick that is a
+# 40-130 s promoter-proximal pause (vs the old 10-25 s, too short to insulate the TSS).
 CLASSES = {
-    "hk_const": dict(frac=0.45, init=(0.5, 0.7),  prel=(0.10, 0.20), req=False, nenh=(0, 0)),
-    "hk_high":  dict(frac=0.10, init=(0.8, 0.95), prel=(0.20, 0.40), req=False, nenh=(0, 1)),
-    "celltype": dict(frac=0.30, init=(0.4, 0.6),  prel=(0.05, 0.15), req=True,  nenh=(1, 3)),
-    "dev":      dict(frac=0.15, init=(0.1, 0.3),  prel=(0.03, 0.08), req=True,  nenh=(2, 5)),
+    "hk_const": dict(frac=0.45, init=(0.5, 0.7),  prel=(0.06, 0.10), req=False, nenh=(0, 0)),
+    "hk_high":  dict(frac=0.10, init=(0.8, 0.95), prel=(0.07, 0.10), req=False, nenh=(0, 1)),
+    "celltype": dict(frac=0.30, init=(0.4, 0.6),  prel=(0.04, 0.09), req=True,  nenh=(1, 3)),
+    "dev":      dict(frac=0.15, init=(0.1, 0.3),  prel=(0.03, 0.07), req=True,  nenh=(2, 5)),
 }
 ORDER = list(CLASSES)
 FRAC = np.array([CLASSES[c]["frac"] for c in ORDER])
@@ -81,7 +89,7 @@ DENS_POOR   = 7.0        # genes/Mb at min density
 FRAC_ACTIVE = np.array([0.35, 0.30, 0.30, 0.05])   # expressed-skewed
 FRAC_POOR   = np.array([0.45, 0.03, 0.20, 0.32])   # poised/silent-skewed
 TXN_NOISE   = 0.15       # how much transcription decouples from density
-BSTR_RANGE  = (0.40, 0.60)   # boundary-strength gradient (low -> high density)
+BSTR_RANGE  = (0.1, 0.3)   # boundary-strength gradient (low -> high density)
 BSTR_TXN_WEIGHT = 0.5        # boundary strength = this*flank_txn + (1-this)*flank_density;
                              # the density term forces corr(flankTADsize, bstrength) negative
 
@@ -135,13 +143,15 @@ def gene_length(rng):
 def _make_gene(rng, tss, tes, cls):
     """Assemble one gene dict for class ``cls`` (fields match the YAML schema)."""
     C = CLASSES[cls]
-    g = dict(tss=int(tss), tes=int(tes), load_prob=0.06,
+    g = dict(tss=int(tss), tes=int(tes), load_prob=0.015,
              requires_enhancer=C["req"], load_requires_enhancer=C["req"],
              initiation_prob=round(rng.uniform(*C["init"]), 2),
              pause_release_prob=round(rng.uniform(*C["prel"]), 2),
-             # cohesin steps ~1/tick; 0.25 keeps Pol II ~4x slower, inside the 3-5x
-             # cohesin:RNAP speed ratio the moving-barrier regime needs (Banigan 2023).
-             elongation_step_prob=0.25, pause_offset=0, termination_prob=0.2)
+             # 0.20 site/tick = 0.05 kb/s = 3 kb/min Pol II; cohesin (0.25 kb/s per leg)
+             # is 5x faster -> moving-barrier regime (Banigan 2023, >=3-5x).
+             # termination 0.03 -> ~130 s 3' dwell: terminating Pol II is the 3' barrier
+             # that relocalizes cohesin (Busslinger 2017); 0.2 (20 s) was far too short.
+             elongation_step_prob=0.20, pause_offset=0, termination_prob=0.03)
     return g, C
 
 
@@ -275,10 +285,12 @@ def fmt_gene(g):
     return "{" + ", ".join(parts) + "}"
 
 
-def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=250, separation=120):
+def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=300, separation=180,
+          trajectory_length=5000):
     # Pol II cap and relaxation/recording scale with locus size & chain count
     max_rnapii = (max(64, int(2560 * (CHAIN / 30000) * (num_chains / 4))) if txn_on else 0)
-    life_ctcf = 4 * lifetime    # CTCF-anchored residence (keep 4x the extrusion lifetime)
+    life_ctcf = 4 * lifetime
+    life_rnapii_stalled = max(1, lifetime // 6)   # RNAPII-evicted cohesin: 1/6 of lifetime
     relax = max(50000, int(1500000 * CHAIN / 30000))
     prerec = max(20000, int(500000 * CHAIN / 30000))
     rl = ("polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii" if txn_on else "null")
@@ -294,7 +306,7 @@ def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=250, separati
   lifetime_stalled: {lifetime}
   lifetime_ctcf: {life_ctcf}
   warmup_steps: 10000
-  trajectory_length: 5000
+  trajectory_length: {trajectory_length}
   chunk_size: 50
   seed: 42
   max_rnapii: {max_rnapii}
@@ -303,19 +315,22 @@ def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=250, separati
     tad_positions: {tad_pos}
     boundary_strength:
 {bstr_block}
-    default_boundary_strength: 1.0
+    default_boundary_strength: 0.60
     release_prob: 0.0
     include_chromosome_ends: true
-    lifetime_rnapii_stalled: {lifetime}
-    rnapii_stall_prob: 0.35
+    # RNAPII-stalled/pushed cohesin is evicted fast (Busslinger 2017; Jeppsson 2022);
+    # lifetime/6 -> at lifetime 300 = 50 ticks = 200 s ~ Banigan t_bypass (100-160 s).
+    # NOT = lifetime (that gave no eviction).
+    lifetime_rnapii_stalled: {life_rnapii_stalled}
+    rnapii_stall_prob: 0.15
     # Head-on (converging) collisions dominate cohesin relocalization: the stronger
-    # motor (RNAP, ~8-30 pN stall force) pushes a converging cohesin leg downstream,
-    # piling cohesin at 3' ends / between convergent genes (Busslinger 2017; Banigan
-    # 2023). headon > codirectional. NB: this intentionally diverges from the
-    # co-directional-dominant rationale in the plugin docstring (rnapii.py:301-303),
-    # which is a comment only -- _resolve_head_on applies whichever prob we emit here.
+    # motor (RNAP, ~10 pN stall force vs cohesin 0.1-1 pN) pushes a converging cohesin
+    # leg downstream, piling cohesin at 3' ends / between convergent genes (Busslinger
+    # 2017; Banigan 2023 Fig 2C). headon >> codirectional. NB: this intentionally
+    # diverges from the co-directional-dominant rationale in the plugin docstring
+    # (rnapii.py:301-303), a comment only -- _resolve_head_on applies whatever we emit.
     rnapii_push_prob: 0.20
-    rnapii_headon_push_prob: 0.50
+    rnapii_headon_push_prob: 0.85
     rnapii_pause_cohesin_restraint: 0.3
     rnapii_pause_restraint_window: 1
     rnapii_poised_block_prob: 0.5
@@ -326,8 +341,8 @@ def build(txn_on, bounds, bstrength, genes, num_chains=4, lifetime=250, separati
     replicate_genes_across_chains: true
     targeted_load_prob: 0.02
     loading_window: 1
-    target_enhancers: true
-    target_tss: true
+    target_enhancers: true     # keep: enhancer/NIPBL loading (Kagey 2010; Fursova 2024)
+    target_tss: false          # Banigan 2023: no preferential TSS loading (artifact)
     weight_loading_by_activity: true
     lesion_prob: 0.0
     genes:
@@ -361,7 +376,7 @@ polymer:
   seed: 2042
   density: 0.2
   pbc: false
-  md_steps_per_block: 5000
+  md_steps_per_block: 635
   save_every_blocks: 1
   restart_every_blocks: 5000
   initial_relaxation_steps: {relax}   # scales with locus size
@@ -376,8 +391,8 @@ polymer:
       kwargs:
         bond_length: 1.0
         bond_wiggle: 0.1
-        angle_k: 1.5
-        repulsion_energy: 50.0
+        angle_k: 1.0
+        repulsion_energy: 1.5
         repulsion_radius: 1.05
         attraction_energy: 0.0
         attraction_radius: 1.1
@@ -387,7 +402,7 @@ polymer:
         selective_attraction_energy: 0.0
         polii_self_affinity: 0.0
         selective_repulsion_energy: 0.0
-        confinement_density: 0.1
+        confinement_density: 0.15
         confinement_per_chain: true
         confinement_k: 5.0
     initial_conformation:
@@ -398,6 +413,9 @@ contacts:
   map_starts: [0]
   map_size: {CHAIN}
   cutoff: [2]
+  # Resolutions (in monomers) at which qc + compare run the 3D analysis: the
+  # native per-monomer ICE'd map plus a 10-monomer coarsened-then-ICE'd map.
+  analysis_resolutions: [1, 10]
   num_processes: 12
   verbose: true
   plugins:
@@ -433,10 +451,14 @@ def main():
                     help="dense-region TAD spacing endpoint (kb); realized dense median is a bit higher")
     ap.add_argument("--long-spacing", type=float, default=LONG_SPACING,
                     help="sparse-region TAD spacing endpoint (kb); realized sparse median is a bit lower")
-    ap.add_argument("--lifetime", type=int, default=375,
-                    help="cohesin lifetime (steps), 4 s/tick, 25 min. Also, cohesin extrusion speed 0.5 kb/second")
-    ap.add_argument("--separation", type=int, default=240,
-                    help="sites per cohesin, e.g separation=240 kb -> 4.2 cohesin/Mb)")
+    ap.add_argument("--lifetime", type=int, default=300,
+                    help="cohesin free/extruding lifetime (ticks); 4 s/tick -> 20 min residence; "
+                         "bare lambda=2*lifetime=600 kb > separation (dense regime). lifetime_ctcf=4x")
+    ap.add_argument("--separation", type=int, default=180,
+                    help="sites per cohesin; 180 kb -> 5.6 cohesin/Mb (Rao 6/Mb). Primary lever on "
+                         "effective loop size / P(s) turning point (effective loop ~= separation)")
+    ap.add_argument("--trajectory-length", type=int, default=10000,
+                    help="number of recorded LEF trajectory steps")
     ap.add_argument("--bstr-mult", type=float, default=1.5,
                     help="config3 = config2 with all boundary strengths X times larger")
 
@@ -464,12 +486,12 @@ def main():
     from pathlib import Path
     od = Path(args.out_dir)
     sfx = args.suffix
-    (od / f"config1_{sfx}.yaml").write_text(build(True, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation))
-    (od / f"config2_{sfx}.yaml").write_text(build(False, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation))
+    (od / f"config1_{sfx}.yaml").write_text(build(True, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation, args.trajectory_length))
+    (od / f"config2_{sfx}.yaml").write_text(build(False, bounds, bstrength, genes, args.num_chains, args.lifetime, args.separation, args.trajectory_length))
     # config3 = byte-identical to config2 (txn OFF) except every boundary strength is
     # X times larger (--bstr-mult). Stronger insulation, same domain skeleton/genes.
     bstrength_x = np.round(np.minimum(bstrength * args.bstr_mult, 1.0), 2)
-    (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, args.num_chains, args.lifetime, args.separation))
+    (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, args.num_chains, args.lifetime, args.separation, args.trajectory_length))
     # per-monomer transcription "ratio" (one value per site, 0..1): every monomer in
     # a TAD inherits that TAD's transcription level, so high-tx TADs -> high ratio,
     # low-tx TADs -> low ratio. Authored for one chain (length CHAIN); the simulation

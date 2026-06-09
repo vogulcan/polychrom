@@ -126,6 +126,7 @@ class LEFConfig:
     lifetime: int = 200              # average lifetime (steps)
     lifetime_stalled: int = 200      # lifetime when stalled (not at CTCF)
     lifetime_ctcf: Optional[int] = None  # lifetime when captured at CTCF (WAPL-protected); None -> lifetime
+    tick_seconds: Optional[float] = None  # biological seconds per 1D tick; None -> legacy analysis fallback
     warmup_steps: int = 0            # dynamics steps to discard before saving
     trajectory_length: int = 100000  # number of LEF dynamics steps to save
     chunk_size: int = 50             # write chunks to LEFPositions.h5
@@ -246,6 +247,15 @@ class ContactsConfig:
     num_processes: int = 6
     verbose: bool = True
 
+    # Contact-map coarsening resolution(s), in monomers, at which the ``qc`` and
+    # ``compare`` stages repeat the 3D analysis. ``1`` = native per-monomer ICE'd
+    # map (the historical default). Any value ``N > 1`` bins the *raw* contact
+    # map into ``N x N`` blocks, ICE-balances the coarsened map, then runs every
+    # 3D metric on it (coordinate annotations -- boundaries / TADs / genes /
+    # lesions -- are scaled by ``N``). This is independent of ``cutoff``: each
+    # resolution analysis is produced for whichever cutoff(s) the run uses.
+    analysis_resolutions: List[int] = field(default_factory=lambda: [1, 10])
+
     plugins: ContactsPlugins = field(default_factory=ContactsPlugins)
 
     @property
@@ -255,6 +265,20 @@ class ContactsConfig:
         if isinstance(c, (list, tuple)):
             return [float(x) for x in c]
         return [float(c)]
+
+    @property
+    def resolution_list(self) -> List[int]:
+        """Analysis resolutions as a sorted, de-duplicated list of ints >= 1.
+
+        Always includes ``1`` (the native per-monomer analysis) so the default
+        outputs are never dropped by an incomplete config.
+        """
+        res = self.analysis_resolutions
+        if isinstance(res, (int, float)):
+            res = [res]
+        vals = {int(r) for r in res if int(r) >= 1}
+        vals.add(1)
+        return sorted(vals)
 
 
 @dataclass

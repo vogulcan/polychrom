@@ -41,6 +41,7 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     stateful_translocate_rnapii,
     translocate_rnapii,
 )
+from polychrom.pipelines.loop_extrusion.qc import rnapii_metrics
 from polychrom.pipelines.loop_extrusion.plugins import (
     forces as force_plugins,
     topology as topology_plugins,
@@ -82,6 +83,7 @@ def test_loop_extrusion_config_supports_warmup_and_seed(tmp_path):
 lef:
   warmup_steps: 123
   seed: 17
+  tick_seconds: 20
 polymer:
   seed: 19
 """
@@ -89,6 +91,7 @@ polymer:
     cfg = load_config(cfg_path)
     assert cfg.lef.warmup_steps == 123
     assert cfg.lef.seed == 17
+    assert cfg.lef.tick_seconds == 20
     assert cfg.polymer.seed == 19
 
 
@@ -378,6 +381,48 @@ def test_rnapii_terminates_at_tes_then_unloads():
     stateful_translocate_rnapii(rnapiis, [], occupied, args)
     assert len(rnapiis) == 0
     assert occupied[20] == 0
+
+
+def test_stateful_rnapii_stride_advances_elongating_pol_ii():
+    gene = build_genes([{"tss": 10, "tes": 30, "elongation_step_prob": 1.0}])[0]
+    occupied = np.zeros(40, dtype=np.int8)
+    r = RNAPII(pos=20, gene_id=0, direction=1)
+    r.attrs["state"] = STATE_ELONGATING
+    occupied[20] = RNAPII_CELL
+    args = {
+        "N": 40,
+        "chain_length": 40,
+        "num_chains": 1,
+        "genes": [gene],
+        "rnapii_by_pos": {20: r},
+        "cohesin_leg_by_pos": {},
+        "ep_contact_tolerance": 1,
+        "rnapii_stride": 2,
+    }
+
+    stateful_translocate_rnapii([r], [], occupied, args)
+
+    assert r.pos == 22
+    assert r.attrs["state"] == STATE_ELONGATING
+    assert occupied[20] == 0
+    assert occupied[22] == RNAPII_CELL
+    assert args["rnapii_by_pos"] == {22: r}
+
+
+def test_rnapii_metrics_counts_multi_site_elongation_steps():
+    rnapii_positions = np.array([[[10, 0]], [[12, 0]], [[14, 0]]], dtype=np.int32)
+    rnapii_states = np.array([[STATE_ELONGATING], [STATE_ELONGATING], [STATE_ELONGATING]], dtype=np.int8)
+    rnapii_ids = np.array([[7], [7], [7]], dtype=np.int32)
+
+    metrics = rnapii_metrics(
+        rnapii_positions,
+        rnapii_states,
+        tick_seconds=20.0,
+        rnapii_ids=rnapii_ids,
+    )
+
+    assert metrics["elongation_speed_sites_per_tick"] == pytest.approx(2.0)
+    assert metrics["elongation_speed_kb_per_min"] == pytest.approx(6.0)
 
 
 def test_terminating_pol_ii_blocks_cohesin():

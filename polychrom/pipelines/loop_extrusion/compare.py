@@ -38,13 +38,16 @@ from . import annotate
 from .config import resolve_plugin
 from .contacts import _effective_map_starts
 from .qc import (
-    aggregate_insulation, anchor_set, asymmetry_index, boundary_crossing,
-    boundary_crossing_stripes,
+    aggregate_insulation_log2, anchor_set, asymmetry_index,
+    boundary_crossing, boundary_crossing_stripes, coarsen_contact_map,
     cohesin_at_lesion_flanks, cohesin_classification, cohesin_occupancy,
-    corner_dot_intensities, insulation_boundary_strength, insulation_profile,
+    corner_dot_intensities, insulation_aggregate_half,
+    insulation_boundary_prominence,
+    insulation_score_cooltools, insulation_windows_for_resolution,
     lesion_metrics, loop_length_stats, observed_over_expected, pileup,
     ps_curve, ps_curve_1d, rescaled_tad_pileup, rnapii_metrics, sanity_1d,
-    stripe_enrichment, tad_strength, tad_strength_from_pileup,
+    scale_resolution_coords, stripe_enrichment, tad_strength,
+    tad_strength_from_pileup, TAD_PILEUP_RESOLUTION,
 )
 from .plugins.sampling import iterative_correction
 
@@ -53,7 +56,7 @@ from .plugins.sampling import iterative_correction
 # comparison, as a fraction of the contact-map size. The large-s tail is
 # dominated by a handful of long-range contacts and is too noisy to compare;
 # curves are truncated here before AUC-normalization. Tune to taste.
-PS_3D_S_MAX_FRAC = 0.25
+PS_3D_S_MAX_FRAC = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,9 @@ class RunData:
     gene_bodies: List[Tuple[int, int]]
     cmap_obs: Optional[np.ndarray]
     cmap_oe: Optional[np.ndarray]
+    # Raw (un-ICE'd, un-coarsened) contact map, kept so the coarsened-resolution
+    # analyses can bin it before ICE. None when no 3D map is available.
+    cmap_raw: Optional[np.ndarray] = None
 
 
 def _gene_coordinates(genes: Any) -> Tuple[List[int], List[int], List[Tuple[int, int]]]:
@@ -166,8 +172,10 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
 
     cmap_obs = None
     cmap_oe = None
+    cmap_raw = None
     if cutoff is not None:
         raw = _sample_raw(cfg, cutoff)
+        cmap_raw = raw
         cmap_obs = np.nan_to_num(
             iterative_correction(raw, ignore_diagonals=2, max_iter=200, tol=1e-5)
         )
@@ -176,6 +184,7 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
         raw_p = Path(getattr(cfg.contacts, "raw_output_path", ""))
         if raw_p.exists():
             raw = np.load(raw_p).astype(float)
+            cmap_raw = raw
             cmap_obs = np.nan_to_num(
                 iterative_correction(raw, ignore_diagonals=2, max_iter=200, tol=1e-5)
             )
@@ -185,16 +194,21 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
             else:
                 cmap_oe = np.nan_to_num(observed_over_expected(cmap_obs), nan=1.0)
 
+    polymer_cfg = getattr(cfg, "polymer", None)
+    tick_seconds = getattr(cfg.lef, "tick_seconds", None)
+    if tick_seconds is None:
+        md_steps_per_block = getattr(polymer_cfg, "md_steps_per_block", 0.0)
+        tick_seconds = float(md_steps_per_block) * 0.0063
     return RunData(
         label=label, positions=pos, rnapii_positions=rp, rnapii_states=rs,
         rnapii_ids=ri, rnapii_enabled=rnapii_enabled,
-        tick_seconds=float(cfg.polymer.md_steps_per_block) * 0.0063,
+        tick_seconds=float(tick_seconds),
         lesions=les, lesion_enabled=lesion_enabled,
         genes_ds=genes_ds, gene_tss=gene_tss, gene_tes=gene_tes,
         gene_enhancers=gene_enhancers,
         chain_length=chain_length, num_chains=num_chains,
         boundaries=boundaries, tads=tads, gene_bodies=gene_bodies,
-        cmap_obs=cmap_obs, cmap_oe=cmap_oe,
+        cmap_obs=cmap_obs, cmap_oe=cmap_oe, cmap_raw=cmap_raw,
     )
 
 
@@ -204,18 +218,30 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
 
 def _collect_1d(r: RunData) -> Dict[str, Any]:
     anch = anchor_set(r.boundaries, r.chain_length)
+    # Boundaries/anchors are chain-relative, while LEFPositions stores absolute
+    # coordinates across replicated chains. Fold to chain-relative for boundary
+    # and anchor-classification metrics, matching qc.py; otherwise only chain 0
+    # matches the anchors while all chains remain in the denominator.
+    positions_rel = r.positions % r.chain_length
     occ = cohesin_occupancy(r.positions, r.chain_length * r.num_chains)
+    anch_abs = {
+        a + c * r.chain_length
+        for c in range(r.num_chains)
+        for a in anch
+    }
     out: Dict[str, Any] = {
         "sanity": sanity_1d(r.positions, r.chain_length, r.num_chains),
         "loop_length": loop_length_stats(
             r.positions,
             edges=[e for e in [0, 50, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000]
                    if e < r.chain_length] + [r.chain_length]),
-        "classification": cohesin_classification(r.positions, anch),
-        "boundary_crossing": boundary_crossing(r.positions, r.boundaries),
-        "boundary_crossing_stripes": boundary_crossing_stripes(r.positions, r.boundaries),
+        "classification": cohesin_classification(positions_rel, anch),
+        "boundary_crossing": boundary_crossing(positions_rel, r.boundaries),
+        "boundary_crossing_stripes": boundary_crossing_stripes(positions_rel, r.boundaries),
         "asymmetry_index": asymmetry_index(r.positions),
-        "cohesin_at_ctcf_anchor_sum": float(sum(occ[s] for s in anch if s < len(occ))),
+        "cohesin_at_ctcf_anchor_sum": float(
+            sum(occ[s] for s in anch_abs if 0 <= s < len(occ))
+        ),
     }
     ps1d = ps_curve_1d(r.positions, r.chain_length, r.num_chains)
     out["ps_1d"] = {
@@ -239,10 +265,15 @@ def _collect_1d(r: RunData) -> Dict[str, Any]:
     return out
 
 
-def _rescaled_crossing_stripes(pile: np.ndarray, kind: str, band: int = 3) -> Dict[str, float]:
+def _rescaled_crossing_stripes(pile: np.ndarray, kind: str, band: Optional[int] = None) -> Dict[str, float]:
     n = pile.shape[0]
     third = n // 3
     two_thirds = 2 * third
+    # Stripe half-width: a fixed fraction of the pile (3 px at the legacy 90-px
+    # resolution). Scale with size so the *physical* band stays constant when
+    # TAD_PILEUP_RESOLUTION changes, keeping the metric comparable across runs.
+    if band is None:
+        band = max(1, round(3 * n / 90))
     if kind == "oe":
         mat = np.log2(np.clip(pile, 1e-3, None))
     elif kind == "obs":
@@ -369,52 +400,72 @@ def _fountain_stats(m: np.ndarray, gene_tss: List[int], gene_tes: List[int],
     }
 
 
-def _collect_3d(r: RunData) -> Optional[Dict[str, Any]]:
-    if r.cmap_obs is None:
+def _collect_3d_maps(
+    cmap_obs: Optional[np.ndarray], cmap_oe: Optional[np.ndarray],
+    tads: List[Tuple[int, int]], boundaries: List[int],
+    gene_tss: List[int], gene_tes: List[int],
+    gene_enhancers: List[List[int]], *, resolution: int = 1,
+) -> Optional[Dict[str, Any]]:
+    """Every 3D metric on explicit obs/expected maps + bin-unit coordinates."""
+    if cmap_obs is None:
         return None
-    m = r.cmap_obs
+    m = cmap_obs
     ps = ps_curve(m)
-    windows = [5, 10, 20, 40, 80, 120]
+    # Physical (monomer) insulation windows -> bins for this resolution; key by
+    # the honest monomer scale so a coarsened map never claims a sub-bin window.
+    windows = insulation_windows_for_resolution(resolution)
+    # Insulation: cooltools-style log2(diamond / median) score (masked-bin aware),
+    # computed once per window. Boundary strength = log2 prominence (higher =
+    # stronger); aggregate dip_depth = flank - center in log2 (higher = stronger).
+    insul_scores = [(wphys, insulation_score_cooltools(m, wb)) for wb, wphys in windows]
+    agg_half = insulation_aggregate_half(resolution)
     out: Dict[str, Any] = {
         "shape": list(m.shape),
-        "tad_strength": tad_strength(m, r.tads),
-        "corner_dot_intensities": corner_dot_intensities(m, r.tads),
+        "resolution": int(resolution),
+        "tad_strength": tad_strength(m, tads),
+        "corner_dot_intensities": corner_dot_intensities(m, tads),
         # O/E corner dot: distance-normalized CTCF-CTCF loop enrichment (proper
         # corner-score; the raw-obs corner dot is distance-confounded).
         "corner_dot_intensities_oe": (
-            corner_dot_intensities(r.cmap_oe, r.tads) if r.cmap_oe is not None else None),
+            corner_dot_intensities(cmap_oe, tads) if cmap_oe is not None else None),
         "ps_at": {str(s): float(ps[s]) for s in (5, 10, 20, 50, 100, 150, 200, 300, 500) if s < len(ps)},
         "insulation_boundary_strength": {
-            str(w): insulation_boundary_strength(insulation_profile(m, w), r.boundaries, w)
-            for w in windows
+            str(wphys): insulation_boundary_prominence(score, boundaries)
+            for wphys, score in insul_scores
         },
         "insulation_aggregate": {
-            str(w): aggregate_insulation(insulation_profile(m, w), r.boundaries)
-            for w in windows
+            str(wphys): aggregate_insulation_log2(score, boundaries, half=agg_half)
+            for wphys, score in insul_scores
         },
         "stripe_enrichment_per_boundary": {
-            str(b): stripe_enrichment(m, b) for b in r.boundaries
+            str(b): stripe_enrichment(m, b) for b in boundaries
         },
     }
-    if r.gene_tss:
+    if gene_tss:
         out["fountain_obs"] = _fountain_stats(
-            m, r.gene_tss, r.gene_tes, r.gene_enhancers, is_oe=False)
-    avg, snips, kept = rescaled_tad_pileup(m, r.tads, target=90)
+            m, gene_tss, gene_tes, gene_enhancers, is_oe=False)
+    avg, snips, kept = rescaled_tad_pileup(m, tads)
     if avg is not None:
         out["tad_pileup_obs"] = tad_strength_from_pileup(avg)
         out["tad_pileup_obs_crossing_stripes"] = _rescaled_crossing_stripes(avg, "obs")
         out["tad_pileup_per_tad"] = {
             str(idx): tad_strength_from_pileup(snips[i]) for i, idx in enumerate(kept)
         }
-    if r.cmap_oe is not None:
-        avg_oe, _, _ = rescaled_tad_pileup(r.cmap_oe, r.tads, target=90)
+    if cmap_oe is not None:
+        avg_oe, _, _ = rescaled_tad_pileup(cmap_oe, tads)
         if avg_oe is not None:
             out["tad_pileup_oe"] = tad_strength_from_pileup(avg_oe)
             out["tad_pileup_oe_crossing_stripes"] = _rescaled_crossing_stripes(avg_oe, "oe")
-        if r.gene_tss:
+        if gene_tss:
             out["fountain_oe"] = _fountain_stats(
-                r.cmap_oe, r.gene_tss, r.gene_tes, r.gene_enhancers, is_oe=True)
+                cmap_oe, gene_tss, gene_tes, gene_enhancers, is_oe=True)
     return out
+
+
+def _collect_3d(r: RunData) -> Optional[Dict[str, Any]]:
+    return _collect_3d_maps(
+        r.cmap_obs, r.cmap_oe, r.tads, r.boundaries,
+        r.gene_tss, r.gene_tes, r.gene_enhancers)
 
 
 # ---------------------------------------------------------------------------
@@ -506,41 +557,54 @@ def _plot_ps(a: np.ndarray, b: np.ndarray, la: str, lb: str, out: Path,
 
 
 def _plot_insulation(ma: np.ndarray, mb: np.ndarray, boundaries: List[int],
-                     la: str, lb: str, out: Path) -> None:
+                     la: str, lb: str, out: Path, factor: int = 1) -> None:
+    """A-vs-B cooltools-style log2 insulation score per window (lower = insulated)."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    windows = [5, 10, 20, 40, 80, 120]
+    windows = insulation_windows_for_resolution(factor)
     fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
-    for k, w in enumerate(windows):
-        ax = axes[k // 3][k % 3]
-        ax.plot(insulation_profile(ma, w), label=la)
-        ax.plot(insulation_profile(mb, w), label=lb)
-        for b in boundaries: ax.axvline(b, color="k", ls=":", alpha=0.4)
-        ax.set_title(f"window={w} kb"); ax.set_ylabel("insulation (raw)")
+    axflat = axes.reshape(-1)
+    for k, (wb, wphys) in enumerate(windows):
+        ax = axflat[k]
+        sa = insulation_score_cooltools(ma, wb)
+        sb = insulation_score_cooltools(mb, wb)
+        ax.plot(np.arange(len(sa)) * factor, sa, label=la)
+        ax.plot(np.arange(len(sb)) * factor, sb, label=lb)
+        ax.axhline(0, color="grey", ls="-", alpha=0.3, lw=0.8)
+        for b in boundaries: ax.axvline(b * factor, color="k", ls=":", alpha=0.4)
+        ax.set_title(f"window={wphys} kb"); ax.set_ylabel("log2 insulation")
         if k == 0: ax.legend(fontsize=8)
+    for k in range(len(windows), len(axflat)):
+        axflat[k].axis("off")
     axes[-1, -1].set_xlabel("position (kb)")
     fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
 
 
 def _plot_insulation_aggregate(ma: np.ndarray, mb: np.ndarray, boundaries: List[int],
-                               la: str, lb: str, out: Path, half: int = 40) -> None:
+                               la: str, lb: str, out: Path, factor: int = 1) -> None:
+    """A-vs-B boundary-centered average of the cooltools log2 insulation score."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    windows = [5, 10, 20, 40, 80, 120]
+    windows = insulation_windows_for_resolution(factor)
+    half = insulation_aggregate_half(factor)
     fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True)
-    for k, w in enumerate(windows):
-        ax = axes[k // 3][k % 3]
-        aa = aggregate_insulation(insulation_profile(ma, w), boundaries, half=half)
-        ab = aggregate_insulation(insulation_profile(mb, w), boundaries, half=half)
+    axflat = axes.reshape(-1)
+    for k, (wb, wphys) in enumerate(windows):
+        ax = axflat[k]
+        aa = aggregate_insulation_log2(insulation_score_cooltools(ma, wb), boundaries, half=half)
+        ab = aggregate_insulation_log2(insulation_score_cooltools(mb, wb), boundaries, half=half)
         if aa["mean_profile"]:
-            ax.plot(aa["offsets"], aa["mean_profile"], label=la)
+            ax.plot(np.asarray(aa["offsets"]) * factor, aa["mean_profile"], label=la)
         if ab["mean_profile"]:
-            ax.plot(ab["offsets"], ab["mean_profile"], label=lb)
+            ax.plot(np.asarray(ab["offsets"]) * factor, ab["mean_profile"], label=lb)
         ax.axvline(0, color="k", ls=":", alpha=0.4)
-        ax.set_title(f"window={w} kb (dip {la}={aa.get('dip_ratio', float('nan')):.2f}, "
-                     f"{lb}={ab.get('dip_ratio', float('nan')):.2f})")
-        ax.set_ylabel("mean insulation (raw)")
+        ax.axhline(0, color="grey", ls="-", alpha=0.3, lw=0.8)
+        ax.set_title(f"window={wphys} kb (dip {la}={aa.get('dip_depth', float('nan')):.2f}, "
+                     f"{lb}={ab.get('dip_depth', float('nan')):.2f})")
+        ax.set_ylabel("mean log2 insulation")
         if k == 0: ax.legend(fontsize=8)
+    for k in range(len(windows), len(axflat)):
+        axflat[k].axis("off")
     axes[-1, -1].set_xlabel("offset from boundary (kb)")
     fig.tight_layout(); fig.savefig(out, dpi=120); plt.close(fig)
 
@@ -608,15 +672,16 @@ def _plot_tad_pileup_compare(ma: np.ndarray, mb: np.ndarray, ea: np.ndarray, eb:
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
-    ap_o, _, _ = rescaled_tad_pileup(ma, tads, 90)
-    aq_o, _, _ = rescaled_tad_pileup(mb, tads, 90)
-    ap_e, _, _ = rescaled_tad_pileup(ea, tads, 90)
-    aq_e, _, _ = rescaled_tad_pileup(eb, tads, 90)
+    ap_o, _, _ = rescaled_tad_pileup(ma, tads)
+    aq_o, _, _ = rescaled_tad_pileup(mb, tads)
+    ap_e, _, _ = rescaled_tad_pileup(ea, tads)
+    aq_e, _, _ = rescaled_tad_pileup(eb, tads)
     fig, axes = plt.subplots(2, 3, figsize=(13, 8))
+    t = TAD_PILEUP_RESOLUTION // 3  # central-third side; thirds at [t, 2t]
     def boxes(ax):
-        ax.add_patch(Rectangle((30, 30), 30, 30, fill=False, ec="lime", lw=1.5))
-        ax.add_patch(Rectangle((30, 0), 30, 30, fill=False, ec="cyan", lw=1.0, ls="--"))
-        ax.add_patch(Rectangle((60, 30), 30, 30, fill=False, ec="cyan", lw=1.0, ls="--"))
+        ax.add_patch(Rectangle((t, t), t, t, fill=False, ec="lime", lw=1.5))
+        ax.add_patch(Rectangle((t, 0), t, t, fill=False, ec="cyan", lw=1.0, ls="--"))
+        ax.add_patch(Rectangle((2 * t, t), t, t, fill=False, ec="cyan", lw=1.0, ls="--"))
     # OBS row — mask the main and ±1 diagonals (self-contacts dominate the scale)
     obs_a_disp = _mask_central_diags(np.log1p(ap_o))
     obs_b_disp = _mask_central_diags(np.log1p(aq_o))
@@ -711,16 +776,153 @@ def _plot_anchor_pileups(ma: np.ndarray, mb: np.ndarray, anchor_groups: Dict[str
 # Orchestrator
 # ---------------------------------------------------------------------------
 
-def _anchor_groups(r: RunData) -> Dict[str, List[int]]:
-    g: Dict[str, List[int]] = {"CTCF boundary": list(r.boundaries)}
-    if r.gene_tss or r.gene_tes:
-        g["gene TSS"] = list(r.gene_tss)
-        g["gene TES"] = list(r.gene_tes)
-    if r.lesion_enabled and r.lesions is not None:
-        sites = [int(s) for s in np.unique(r.lesions[r.lesions >= 0])]
-        if sites:
-            g["lesions"] = sites
+def _anchor_groups_from(boundaries: List[int], gene_tss: List[int],
+                        gene_tes: List[int],
+                        lesion_sites: Optional[List[int]]) -> Dict[str, List[int]]:
+    g: Dict[str, List[int]] = {"CTCF boundary": list(boundaries)}
+    if gene_tss or gene_tes:
+        g["gene TSS"] = list(gene_tss)
+        g["gene TES"] = list(gene_tes)
+    if lesion_sites:
+        g["lesions"] = list(lesion_sites)
     return g
+
+
+def _anchor_groups(r: RunData) -> Dict[str, List[int]]:
+    sites = None
+    if r.lesion_enabled and r.lesions is not None:
+        ls = [int(s) for s in np.unique(r.lesions[r.lesions >= 0])]
+        sites = ls or None
+    return _anchor_groups_from(r.boundaries, r.gene_tss, r.gene_tes, sites)
+
+
+def _coarsen_run(r: RunData, factor: int):
+    """Coarsen a run's raw map to ``factor``-monomer bins, ICE + O/E, scale coords.
+
+    Returns ``(cmap_obs, cmap_oe, scaled_coords)`` where ``scaled_coords`` is the
+    :func:`scale_resolution_coords` dict plus a ``gene_enhancers`` entry, all in
+    the coarsened map's bin units.
+    """
+    rc = coarsen_contact_map(r.cmap_raw, factor)
+    obs = np.nan_to_num(
+        iterative_correction(rc, ignore_diagonals=2, max_iter=200, tol=1e-5))
+    oe = np.nan_to_num(observed_over_expected(obs), nan=1.0)
+    n_bins = obs.shape[0]
+    les_sites = None
+    if r.lesion_enabled and r.lesions is not None:
+        ls = [int(s) for s in np.unique(r.lesions[r.lesions >= 0])]
+        les_sites = ls or None
+    sc = scale_resolution_coords(r.boundaries, r.gene_tss, r.gene_tes,
+                                 les_sites, factor, n_bins)
+    sc["gene_enhancers"] = [[e // factor for e in lst] for lst in r.gene_enhancers]
+    return obs, oe, sc
+
+
+def _plot_3d_pair(a_obs, b_obs, a_oe, b_oe, *, boundaries, tads,
+                  gene_tss, gene_tes, gene_enhancers, anchor_groups,
+                  label_a, label_b, plots: Path, prefix: str,
+                  factor: int = 1) -> Dict[str, Any]:
+    """Render the full 3D comparison plot set for one resolution; return the
+    quantified pile-up summaries keyed for the metrics dict."""
+    _plot_contact_maps(a_obs, b_obs, a_oe, b_oe, boundaries, label_a, label_b,
+                       plots / f"{prefix}contact_map_compare.png",
+                       ann=annotate.from_lists(boundaries, gene_tss, gene_tes,
+                                               gene_enhancers, origin=0,
+                                               span=a_obs.shape[0]))
+    _plot_ps(ps_curve(a_obs), ps_curve(b_obs), label_a, label_b,
+             plots / f"{prefix}Ps_3d_compare.png", title="P(s) — 3D contact map",
+             auc_normalize=True,
+             s_max=int(min(a_obs.shape[0], b_obs.shape[0]) * PS_3D_S_MAX_FRAC))
+    _plot_insulation(a_obs, b_obs, boundaries, label_a, label_b,
+                     plots / f"{prefix}insulation_compare.png", factor=factor)
+    _plot_insulation_aggregate(a_obs, b_obs, boundaries, label_a, label_b,
+                               plots / f"{prefix}insulation_aggregate_compare.png", factor=factor)
+    out: Dict[str, Any] = {}
+    out["tad_pileup_compare"] = _plot_tad_pileup_compare(
+        a_obs, b_obs, a_oe, b_oe, tads, label_a, label_b,
+        plots / f"{prefix}tad_pileup_compare.png")
+    out["anchor_pileups_obs"] = _plot_anchor_pileups(
+        a_obs, b_obs, anchor_groups, label_a, label_b,
+        plots / f"{prefix}anchor_pileups_compare_obs.png", use_log2=False)
+    out["anchor_pileups_oe"] = _plot_anchor_pileups(
+        a_oe, b_oe, anchor_groups, label_a, label_b,
+        plots / f"{prefix}anchor_pileups_compare_oe.png", use_log2=True)
+    return out
+
+
+def _compute_3d_folds(a3: Dict[str, Any], b3: Dict[str, Any]) -> Dict[str, Any]:
+    """B/A folds (and deltas) for the 3D metrics of one resolution."""
+    folds: Dict[str, Any] = {}
+    folds["corner_dot_intensities_per_tad"] = [
+        _fold(p, q) for p, q in zip(
+            a3["corner_dot_intensities"], b3["corner_dot_intensities"])
+    ]
+    if a3.get("corner_dot_intensities_oe") and b3.get("corner_dot_intensities_oe"):
+        folds["corner_dot_intensities_oe_per_tad"] = [
+            _fold(p, q) for p, q in zip(
+                a3["corner_dot_intensities_oe"], b3["corner_dot_intensities_oe"])
+        ]
+    if "stripe_enrichment_per_boundary" in a3 and "stripe_enrichment_per_boundary" in b3:
+        folds["stripe_enrichment_per_boundary"] = {}
+        for boundary in sorted(set(a3["stripe_enrichment_per_boundary"]) &
+                               set(b3["stripe_enrichment_per_boundary"]), key=int):
+            a_stripe = a3["stripe_enrichment_per_boundary"][boundary]
+            b_stripe = b3["stripe_enrichment_per_boundary"][boundary]
+            folds["stripe_enrichment_per_boundary"][boundary] = {
+                "left_enrichment_x": _fold(a_stripe.get("left_enrichment_x"),
+                                           b_stripe.get("left_enrichment_x")),
+                "right_enrichment_x": _fold(a_stripe.get("right_enrichment_x"),
+                                            b_stripe.get("right_enrichment_x")),
+            }
+    # Insulation is cooltools-style log2: compare boundary strength (prominence)
+    # and aggregate dip_depth with a delta (B - A; positive = stronger in B), not
+    # a ratio, since both are already in log2 units.
+    if "insulation_boundary_strength" in a3 and "insulation_boundary_strength" in b3:
+        folds["insulation_boundary_strength_delta"] = {
+            w: (b3["insulation_boundary_strength"][w].get("mean", float("nan"))
+                - a3["insulation_boundary_strength"][w].get("mean", float("nan")))
+            for w in a3["insulation_boundary_strength"]
+            if w in b3["insulation_boundary_strength"]
+        }
+    if "insulation_aggregate" in a3 and "insulation_aggregate" in b3:
+        folds["insulation_aggregate_dip_delta"] = {
+            w: (b3["insulation_aggregate"][w].get("dip_depth", float("nan"))
+                - a3["insulation_aggregate"][w].get("dip_depth", float("nan")))
+            for w in a3["insulation_aggregate"] if w in b3["insulation_aggregate"]
+        }
+    if "tad_pileup_obs" in a3 and "tad_pileup_obs" in b3:
+        folds["tad_strength_obs"] = _fold(a3["tad_pileup_obs"]["strength"],
+                                          b3["tad_pileup_obs"]["strength"])
+    if "tad_pileup_obs_crossing_stripes" in a3 and "tad_pileup_obs_crossing_stripes" in b3:
+        folds["tad_pileup_obs_crossing_stripe_contrast_delta"] = (
+            b3["tad_pileup_obs_crossing_stripes"]["mean_contrast"] -
+            a3["tad_pileup_obs_crossing_stripes"]["mean_contrast"]
+        )
+    if "tad_pileup_oe" in a3 and "tad_pileup_oe" in b3:
+        folds["tad_strength_oe"] = _fold(a3["tad_pileup_oe"]["strength"],
+                                         b3["tad_pileup_oe"]["strength"])
+    if "tad_pileup_oe_crossing_stripes" in a3 and "tad_pileup_oe_crossing_stripes" in b3:
+        folds["tad_pileup_oe_crossing_stripe_contrast_delta"] = (
+            b3["tad_pileup_oe_crossing_stripes"]["mean_contrast"] -
+            a3["tad_pileup_oe_crossing_stripes"]["mean_contrast"]
+        )
+    if "fountain_obs" in a3 and "fountain_obs" in b3:
+        folds["fountain_obs_score"] = _fold(
+            a3["fountain_obs"]["fountain_score"], b3["fountain_obs"]["fountain_score"])
+        folds["fountain_obs_symmetry"] = _fold(
+            a3["fountain_obs"]["symmetry"], b3["fountain_obs"]["symmetry"])
+        folds["fountain_obs_enhancer_tss_mean"] = _fold(
+            a3["fountain_obs"].get("enhancer_tss_mean"),
+            b3["fountain_obs"].get("enhancer_tss_mean"))
+    if "fountain_oe" in a3 and "fountain_oe" in b3:
+        folds["fountain_oe_score"] = _fold(
+            a3["fountain_oe"]["fountain_score"], b3["fountain_oe"]["fountain_score"])
+        folds["fountain_oe_symmetry"] = _fold(
+            a3["fountain_oe"]["symmetry"], b3["fountain_oe"]["symmetry"])
+        folds["fountain_oe_enhancer_tss_mean"] = _fold(
+            a3["fountain_oe"].get("enhancer_tss_mean"),
+            b3["fountain_oe"].get("enhancer_tss_mean"))
+    return folds
 
 
 def _fold(a: float, b: float) -> Optional[float]:
@@ -764,34 +966,16 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
              label_a, label_b, plots / f"{plot_prefix}Ps_1d_compare.png",
              title="P(s) — 1D bridge contacts")
 
-    # ---- 3D plots (need both)
+    # ---- 3D plots (need both) -- native per-monomer ICE'd map (resolution 1)
     if a.cmap_obs is not None and b.cmap_obs is not None:
-        _plot_contact_maps(a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe,
-                           a.boundaries, label_a, label_b, plots / f"{plot_prefix}contact_map_compare.png",
-                           ann=annotate.from_lists(a.boundaries, a.gene_tss, a.gene_tes,
-                                                   a.gene_enhancers, origin=0,
-                                                   span=a.cmap_obs.shape[0]))
-        _plot_ps(ps_curve(a.cmap_obs), ps_curve(b.cmap_obs),
-                 label_a, label_b, plots / f"{plot_prefix}Ps_3d_compare.png",
-                 title="P(s) — 3D contact map", auc_normalize=True,
-                 s_max=int(min(a.cmap_obs.shape[0], b.cmap_obs.shape[0]) * PS_3D_S_MAX_FRAC))
-        _plot_insulation(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
-                         plots / f"{plot_prefix}insulation_compare.png")
-        _plot_insulation_aggregate(a.cmap_obs, b.cmap_obs, a.boundaries, label_a, label_b,
-                                   plots / f"{plot_prefix}insulation_aggregate_compare.png")
-        # Flyamer rescaled-TAD pile-up
-        tp = _plot_tad_pileup_compare(
-            a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe, a.tads,
-            label_a, label_b, plots / f"{plot_prefix}tad_pileup_compare.png")
-        metrics["tad_pileup_compare"] = tp
-        # anchor pile-ups (obs + O/E)
-        groups = _anchor_groups(a)  # use A's anchor set
-        metrics["anchor_pileups_obs"] = _plot_anchor_pileups(
-            a.cmap_obs, b.cmap_obs, groups, label_a, label_b,
-            plots / f"{plot_prefix}anchor_pileups_compare_obs.png", use_log2=False)
-        metrics["anchor_pileups_oe"] = _plot_anchor_pileups(
-            a.cmap_oe, b.cmap_oe, groups, label_a, label_b,
-            plots / f"{plot_prefix}anchor_pileups_compare_oe.png", use_log2=True)
+        pl = _plot_3d_pair(
+            a.cmap_obs, b.cmap_obs, a.cmap_oe, b.cmap_oe,
+            boundaries=a.boundaries, tads=a.tads,
+            gene_tss=a.gene_tss, gene_tes=a.gene_tes, gene_enhancers=a.gene_enhancers,
+            anchor_groups=_anchor_groups(a),  # use A's anchor set
+            label_a=label_a, label_b=label_b, plots=plots, prefix=plot_prefix,
+            factor=1)
+        metrics.update(pl)
 
     # ---- folds for top-line numbers
     folds: Dict[str, Any] = {}
@@ -810,81 +994,49 @@ def _run_pair(cfg_a, cfg_b, out_dir: Path, label_a: str, label_b: str,
         b1["boundary_crossing_stripes"]["mean"]["stripe_share_of_crossing_frames"],
     )
     if "3d" in metrics[label_a] and "3d" in metrics[label_b]:
-        a3 = metrics[label_a]["3d"]; b3 = metrics[label_b]["3d"]
-        folds["corner_dot_intensities_per_tad"] = [
-            _fold(p, q) for p, q in zip(
-                a3["corner_dot_intensities"],
-                b3["corner_dot_intensities"],
-            )
-        ]
-        if a3.get("corner_dot_intensities_oe") and b3.get("corner_dot_intensities_oe"):
-            folds["corner_dot_intensities_oe_per_tad"] = [
-                _fold(p, q) for p, q in zip(
-                    a3["corner_dot_intensities_oe"],
-                    b3["corner_dot_intensities_oe"],
-                )
-            ]
-        if "stripe_enrichment_per_boundary" in a3 and "stripe_enrichment_per_boundary" in b3:
-            folds["stripe_enrichment_per_boundary"] = {}
-            for boundary in sorted(set(a3["stripe_enrichment_per_boundary"]) &
-                                   set(b3["stripe_enrichment_per_boundary"]), key=int):
-                a_stripe = a3["stripe_enrichment_per_boundary"][boundary]
-                b_stripe = b3["stripe_enrichment_per_boundary"][boundary]
-                folds["stripe_enrichment_per_boundary"][boundary] = {
-                    "left_enrichment_x": _fold(a_stripe.get("left_enrichment_x"),
-                                               b_stripe.get("left_enrichment_x")),
-                    "right_enrichment_x": _fold(a_stripe.get("right_enrichment_x"),
-                                                b_stripe.get("right_enrichment_x")),
-                }
-        if "insulation_aggregate" in a3 and "insulation_aggregate" in b3:
-            folds["insulation_aggregate_dip"] = {
-                w: _fold(a3["insulation_aggregate"][w].get("dip_ratio"),
-                         b3["insulation_aggregate"][w].get("dip_ratio"))
-                for w in a3["insulation_aggregate"] if w in b3["insulation_aggregate"]
-            }
-        if "tad_pileup_obs" in a3:
-            folds["tad_strength_obs"] = _fold(a3["tad_pileup_obs"]["strength"],
-                                                b3["tad_pileup_obs"]["strength"])
-        if "tad_pileup_obs_crossing_stripes" in a3:
-            folds["tad_pileup_obs_crossing_stripe_contrast_delta"] = (
-                b3["tad_pileup_obs_crossing_stripes"]["mean_contrast"] -
-                a3["tad_pileup_obs_crossing_stripes"]["mean_contrast"]
-            )
-        if "tad_pileup_oe" in a3:
-            folds["tad_strength_oe"] = _fold(a3["tad_pileup_oe"]["strength"],
-                                               b3["tad_pileup_oe"]["strength"])
-        if "tad_pileup_oe_crossing_stripes" in a3:
-            folds["tad_pileup_oe_crossing_stripe_contrast_delta"] = (
-                b3["tad_pileup_oe_crossing_stripes"]["mean_contrast"] -
-                a3["tad_pileup_oe_crossing_stripes"]["mean_contrast"]
-            )
-        if "fountain_obs" in a3 and "fountain_obs" in b3:
-            folds["fountain_obs_score"] = _fold(
-                a3["fountain_obs"]["fountain_score"],
-                b3["fountain_obs"]["fountain_score"],
-            )
-            folds["fountain_obs_symmetry"] = _fold(
-                a3["fountain_obs"]["symmetry"],
-                b3["fountain_obs"]["symmetry"],
-            )
-            folds["fountain_obs_enhancer_tss_mean"] = _fold(
-                a3["fountain_obs"].get("enhancer_tss_mean"),
-                b3["fountain_obs"].get("enhancer_tss_mean"),
-            )
-        if "fountain_oe" in a3 and "fountain_oe" in b3:
-            folds["fountain_oe_score"] = _fold(
-                a3["fountain_oe"]["fountain_score"],
-                b3["fountain_oe"]["fountain_score"],
-            )
-            folds["fountain_oe_symmetry"] = _fold(
-                a3["fountain_oe"]["symmetry"],
-                b3["fountain_oe"]["symmetry"],
-            )
-            folds["fountain_oe_enhancer_tss_mean"] = _fold(
-                a3["fountain_oe"].get("enhancer_tss_mean"),
-                b3["fountain_oe"].get("enhancer_tss_mean"),
-            )
+        folds.update(_compute_3d_folds(metrics[label_a]["3d"], metrics[label_b]["3d"]))
     metrics["folds"] = folds
+
+    # ---- coarsened-resolution analyses: bin the raw map N x N, ICE, then run the
+    # full 3D comparison again. Independent of ``cutoff``; native (res 1) keeps
+    # the historical keys/paths, each extra resolution is suffixed ``_resN``.
+    resolutions = [f for f in getattr(cfg_a.contacts, "resolution_list", [1]) if f != 1]
+    if resolutions and a.cmap_raw is not None and b.cmap_raw is not None:
+        for factor in resolutions:
+            # Skip resolutions too coarse for either map (<3 bins) rather than
+            # crashing the comparison.
+            if min(a.cmap_raw.shape[0], b.cmap_raw.shape[0]) // factor < 3:
+                print(f"[compare] skipping analysis_resolution {factor}: contact map "
+                      f"coarsens to <3 bins")
+                continue
+            suffix = f"_res{factor}"
+            rprefix = f"{plot_prefix}res{factor}_"
+            a_obs, a_oe, a_sc = _coarsen_run(a, factor)
+            b_obs, b_oe, b_sc = _coarsen_run(b, factor)
+            md3a = _collect_3d_maps(a_obs, a_oe, a_sc["tads"], a_sc["boundaries"],
+                                    a_sc["gene_tss"], a_sc["gene_tes"],
+                                    a_sc["gene_enhancers"], resolution=factor)
+            md3b = _collect_3d_maps(b_obs, b_oe, b_sc["tads"], b_sc["boundaries"],
+                                    b_sc["gene_tss"], b_sc["gene_tes"],
+                                    b_sc["gene_enhancers"], resolution=factor)
+            if md3a is not None:
+                metrics[label_a][f"3d{suffix}"] = md3a
+            if md3b is not None:
+                metrics[label_b][f"3d{suffix}"] = md3b
+            pl = _plot_3d_pair(
+                a_obs, b_obs, a_oe, b_oe,
+                boundaries=a_sc["boundaries"], tads=a_sc["tads"],
+                gene_tss=a_sc["gene_tss"], gene_tes=a_sc["gene_tes"],
+                gene_enhancers=a_sc["gene_enhancers"],
+                anchor_groups=_anchor_groups_from(
+                    a_sc["boundaries"], a_sc["gene_tss"], a_sc["gene_tes"],
+                    a_sc["lesion_sites"]),
+                label_a=label_a, label_b=label_b, plots=plots, prefix=rprefix,
+                factor=factor)
+            for k, v in pl.items():
+                metrics[f"{k}{suffix}"] = v
+            if md3a is not None and md3b is not None:
+                metrics[f"folds{suffix}"] = _compute_3d_folds(md3a, md3b)
 
     (out_dir / json_name).write_text(json.dumps(metrics, indent=2, default=str))
     _write_report(metrics, out_dir / report_name, label_a, label_b, plot_prefix=plot_prefix)
@@ -917,6 +1069,11 @@ def _write_tad_strength_vs_cutoff(rows: List[Dict[str, Any]], path: Path,
                                   la: str, lb: str) -> None:
     """Consolidated Flyamer TAD-strength (obs + O/E) across contact cutoffs."""
     lines = [f"# Flyamer TAD strength vs contact cutoff: {la} vs {lb}\n"]
+    lines.append(
+        "Use the O/E columns for cross-config TAD-strength interpretation; "
+        "OBS is the raw within/between ratio and can move with P(s) or map-scale "
+        "contact redistribution.\n"
+    )
     lines.append(
         f"| cutoff | OBS {la} | OBS {lb} | OBS {lb}/{la} | "
         f"O/E {la} | O/E {lb} | O/E {lb}/{la} |"
@@ -1086,6 +1243,11 @@ def _write_many_tad_strength_vs_cutoff(
 ) -> None:
     """Flyamer obs + O/E TAD strength vs contact cutoff, one section per comparison."""
     lines = [f"# Flyamer TAD strength vs contact cutoff (baseline {baseline_label})\n"]
+    lines.append(
+        "Use O/E as the primary cross-config TAD-strength metric. OBS is retained "
+        "as the raw within/between ratio and is sensitive to distance-dependent "
+        "contact decay and global map redistribution.\n"
+    )
     labels: List[str] = []
     for _c, summ in per_cutoff:
         for lbl in summ["comparisons"]:
@@ -1208,15 +1370,19 @@ def _write_report(m: Dict[str, Any], path: Path, la: str, lb: str,
                 fold = vb / va if va else float("nan")
                 lines.append(f"| {s} | {va:.2e} | {vb:.2e} | {fold:.2f} |")
         if "tad_pileup_obs" in a3:
-            lines.append(row("TAD strength, Flyamer (OBS)",
+            lines.append(row("TAD strength, Flyamer (raw OBS)",
                              f"{a3['tad_pileup_obs']['strength']:.2f}",
                              f"{b3['tad_pileup_obs']['strength']:.2f}",
                              f"{f.get('tad_strength_obs') or float('nan'):.2f}"))
         if "tad_pileup_oe" in a3:
-            lines.append(row("TAD strength, Flyamer (O/E)",
+            lines.append(row("TAD strength, Flyamer (O/E, primary)",
                              f"{a3['tad_pileup_oe']['strength']:.2f}",
                              f"{b3['tad_pileup_oe']['strength']:.2f}",
                              f"{f.get('tad_strength_oe') or float('nan'):.2f}"))
+            lines.append(
+                "\nFor cross-config TAD strength, interpret the O/E row first; "
+                "the raw OBS row is useful for diagnosing global contact shifts."
+            )
         if "tad_pileup_obs_crossing_stripes" in a3 or "tad_pileup_oe_crossing_stripes" in a3:
             lines.append("\n### 3D Rescaled-TAD Crossing Stripes")
             lines.append(f"| map | {la} contrast | {lb} contrast | {lb}-{la} |")
@@ -1297,4 +1463,49 @@ def _write_report(m: Dict[str, Any], path: Path, la: str, lb: str,
         prefixed = f"{plot_prefix}{fn}"
         if (path.parent / "plots" / prefixed).exists():
             lines.append(f"- [{fn}](plots/{prefixed})")
+
+    # Coarsened-resolution 3D comparisons (raw map binned N x N, then ICE'd).
+    res_keys = sorted(k for k in m.get(la, {}) if k.startswith("3d_res"))
+    for key in res_keys:
+        factor = key[len("3d_res"):]
+        suffix = f"_res{factor}"
+        a3 = m[la].get(key); b3 = m[lb].get(key)
+        fr = m.get(f"folds{suffix}", {})
+        lines.append(f"\n## 3D @ {factor}-monomer resolution (coarsened then ICE-balanced)")
+        if a3 and b3:
+            lines.append(f"| metric | {la} | {lb} | {lb}/{la} |")
+            lines.append("|---|---|---|---|")
+            if "tad_pileup_obs" in a3 and "tad_pileup_obs" in b3:
+                lines.append(
+                    f"| TAD strength, Flyamer (raw OBS) | {a3['tad_pileup_obs']['strength']:.2f} | "
+                    f"{b3['tad_pileup_obs']['strength']:.2f} | "
+                    f"{_fmt_summary(fr.get('tad_strength_obs'))} |")
+            if "tad_pileup_oe" in a3 and "tad_pileup_oe" in b3:
+                lines.append(
+                    f"| TAD strength, Flyamer (O/E, primary) | {a3['tad_pileup_oe']['strength']:.2f} | "
+                    f"{b3['tad_pileup_oe']['strength']:.2f} | "
+                    f"{_fmt_summary(fr.get('tad_strength_oe'))} |")
+            if "fountain_oe" in a3 and "fountain_oe" in b3:
+                lines.append(
+                    f"| fountain O/E score | {a3['fountain_oe']['fountain_score']:.3f} | "
+                    f"{b3['fountain_oe']['fountain_score']:.3f} | "
+                    f"{_fmt_summary(fr.get('fountain_oe_score'))} |")
+            ca = a3.get("insulation_boundary_strength", {})
+            cb = b3.get("insulation_boundary_strength", {})
+            shared = [w for w in ca if w in cb]
+            if shared:
+                w = max(shared, key=int)  # largest (most robust) window
+                cdelta = fr.get("insulation_boundary_strength_delta", {}).get(w)
+                lines.append(
+                    f"| insulation strength, cooltools (w={w}, B−A) | "
+                    f"{ca[w].get('mean', float('nan')):.3f} | "
+                    f"{cb[w].get('mean', float('nan')):.3f} | "
+                    f"{_fmt_summary(cdelta)} |")
+        for fn in ("Ps_3d_compare", "insulation_compare", "insulation_aggregate_compare",
+                   "contact_map_compare", "tad_pileup_compare",
+                   "anchor_pileups_compare_obs", "anchor_pileups_compare_oe"):
+            prefixed = f"{plot_prefix}res{factor}_{fn}.png"
+            if (path.parent / "plots" / prefixed).exists():
+                lines.append(f"- [{fn}{suffix}.png](plots/{prefixed})")
+
     path.write_text("\n".join(lines))

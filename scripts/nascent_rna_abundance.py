@@ -85,6 +85,8 @@ def ensure_h5(cfg, h5_path: Path) -> None:
 
 
 def tick_seconds(cfg) -> float:
+    if getattr(cfg.lef, "tick_seconds", None) is not None:
+        return float(cfg.lef.tick_seconds)
     # Cohesin clock: the loop grows 2*BP_PER_SITE per tick (both legs step one
     # 1-kb monomer). md_steps_per_block sets only the 3D MD clock, not 1D time.
     return 2.0 * BP_PER_SITE / V_COHESIN_BPS   # = 16.0 s, md-step-independent

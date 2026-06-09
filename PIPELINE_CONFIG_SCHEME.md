@@ -38,6 +38,7 @@ lef:
   lifetime: <cohesin lifetime in 1D ticks>
   lifetime_stalled: <lifetime when stalled by non-CTCF obstacles>
   lifetime_ctcf: <optional; lifetime when captured at a CTCF site (defaults to lifetime)>
+  tick_seconds: <optional; biological seconds per 1D tick for QC/compare/reporting>
   warmup_steps: <discarded 1D ticks before recording>
   trajectory_length: <recorded 1D ticks>
   chunk_size: <number of HDF5 write chunks>
@@ -263,6 +264,7 @@ The `lef` section controls the 1D lattice simulation.
 | `lifetime` | `200` | Average cohesin lifetime in 1D ticks. |
 | `lifetime_stalled` | `200` | Lifetime used when a cohesin is stalled by a non-CTCF obstacle. |
 | `lifetime_ctcf` | `null` | Lifetime used while a cohesin is captured at a CTCF site. Models WAPL-protected boundary-stabilized residence (Wutz 2017; Haarhuis 2017). `null` falls back to `lifetime`. Larger = longer docked dwell = stronger corner/anchor accumulation. |
+| `tick_seconds` | `null` | Biological seconds per 1D tick. When set, QC/compare/reporting use this explicit timebase instead of deriving seconds from `polymer.md_steps_per_block * 0.0063`. |
 | `warmup_steps` | `0` | 1D ticks to run before recording; discarded from output. |
 | `trajectory_length` | `100000` | Number of recorded 1D frames. This also drives the number of LEF frames available to OpenMM. |
 | `chunk_size` | `50` | Number of HDF5 write chunks used while recording `positions`. |
@@ -364,7 +366,7 @@ Per-gene fields:
 | `load_requires_enhancer` | no | `false` | If true, RNAPII recruitment to the TSS also requires current E-P contact. |
 | `initiation_prob` | no | `1.0` | POISED to PAUSED probability per tick. |
 | `pause_release_prob` | no | `1.0` | PAUSED to ELONGATING probability per eligible tick. |
-| `elongation_step_prob` | no | `1.0` | Probability an ELONGATING RNAPII advances one site per tick. |
+| `elongation_step_prob` | no | `1.0` | Probability an ELONGATING RNAPII advances during each stride substep. |
 | `pause_offset` | no | `0` | Optional promoter-proximal pause offset from the TSS. |
 | `termination_prob` | no | `1.0` | TERMINATING unload probability per tick after reaching TES. |
 
@@ -375,7 +377,7 @@ Common `gene_aware_*` kwargs:
 | `genes` | `null` | List of gene dictionaries. |
 | `replicate_genes_across_chains` | `false` | Treat gene coordinates as chain-relative and copy them to each chain. |
 | `rnapii_default_load_prob` | `0.02` | Default gene `load_prob`. |
-| `rnapii_stride` | `1` | Step count for the legacy single-state RNAPII translocator. |
+| `rnapii_stride` | `1` | Maximum sites an ELONGATING RNAPII can advance per 1D tick; used by both single-state and stateful RNAPII translocators. |
 | `lifetime_rnapii_stalled` | `lifetime_stalled` | Cohesin residence (1D ticks) used **only** when a cohesin is stalled or pushed *by RNAPII* (the `rnapii_stalled` flag), modeling active Pol II eviction of cohesin (Busslinger 2017; Jeppsson 2022). Kept separate from generic `lifetime_stalled` so depleting RNAPII restores residence only where transcription caused eviction (the config1-vs-config2 loop-shortening mechanism). Smaller = faster eviction = shorter loops in gene bodies. |
 | `rnapii_stall_prob` | `0.4` | Intrinsic probability that elongating RNAPII stalls on a cohesin obstacle. |
 | `rnapii_push_prob` | `0.3` | Probability that an elongating RNAPII pushes a co-directional cohesin leg. |
@@ -761,6 +763,7 @@ PNG.
 | `replicate_map_starts_across_chains` | `false` | Expand chain-relative starts across all chains. |
 | `map_size` | `4000` | Square contact-map size for each sampled window. |
 | `cutoff` | `6.0` | 3D distance cutoff for contact counting. May be a single value or a list of cutoffs (e.g. `[2, 3, 4, 5, 6]`); see [Multiple Cutoffs](#multiple-cutoffs). |
+| `analysis_resolutions` | `[1, 10]` | Contact-map coarsening resolution(s), in monomers, at which `qc` and `compare` run the 3D analysis; see [Analysis Resolutions](#analysis-resolutions). |
 | `num_processes` | `6` | CPU workers for contact-map counting. |
 | `verbose` | `true` | Verbosity passed to the sampler. |
 | `plugins` | default `ContactsPlugins` | Sampler, O/E, post-process, and visualization hooks. |
@@ -799,6 +802,51 @@ by stage and cutoff tag.
 This is independent of the `compare --cutoffs` option, which resamples each
 run's trajectory at several cutoffs into `cutoff_<c>/` subfolders for pairwise
 comparison.
+
+### Analysis Resolutions
+
+`analysis_resolutions` controls the contact-map resolution(s) at which the `qc`
+and `compare` stages run the 3D analysis. It does **not** affect the `contacts`
+stage or how maps are sampled — the raw map is always sampled per monomer.
+
+```yaml
+contacts:
+  analysis_resolutions: [1, 10]
+```
+
+* **`1`** (always included, even if omitted) is the historical default: the 3D
+  analysis runs on the native per-monomer ICE-balanced map.
+* Each value **`N > 1`** bins the *raw* map into `N x N` blocks (summing
+  contacts), ICE-balances the coarsened map, then runs every 3D metric on it.
+  Coordinate annotations (boundaries, TADs, gene TSS/TES, lesions) are scaled by
+  `N`; an incomplete trailing block is dropped. Coarsening happens **before** ICE,
+  i.e. the map is *prepared at `N`-monomer resolution and then balanced*.
+
+Metrics that take a genomic-scale window (insulation) are expressed in **physical
+monomers (~kb)**, not bins: at resolution `N` each window is converted to
+`window // N` bins, and windows finer than 2 bins are dropped (you cannot resolve
+insulation below the bin size). So the native map reports windows 5–120 kb, while
+the 10-monomer map reports 20–120 kb — never a sub-resolution window.
+
+**Insulation is computed cooltools-style** everywhere (qc and compare): the score
+is `log2(diamond_sum / median(diamond_sum))` over the off-diagonal diamond window,
+with masked/low-coverage bins excluded (not counted as zero). Boundary strength is
+the **log2 prominence** of the insulation minimum at each boundary (higher =
+stronger), and the boundary-centered aggregate reports `dip_depth = flank − center`
+in log2 (higher = stronger). compare reports B−A **deltas** for both (log2 units),
+not ratios. The legacy raw-mean insulation (ratio-based) is no longer produced.
+
+Outputs are additive and never overwrite the native ones:
+
+* `qc` writes native metrics under `metrics["3d"]` and each coarsened resolution
+  under `metrics["3d_resN"]`, with plots suffixed `_resN.png` (e.g.
+  `Ps_3d_res10.png`) and a per-resolution section in `report.md`.
+* `compare` writes native 3D metrics/plots as before and adds `3d_resN`
+  per-run metrics, `folds_resN`, `<name>_resN` pile-up summaries, `resN_`-prefixed
+  plots, and a per-resolution section in `compare.md`.
+
+This is independent of `cutoff` / `compare --cutoffs`: every cutoff a run uses is
+analysed at each configured resolution.
 
 ### Contact Plugins
 
@@ -981,8 +1029,8 @@ i.e. setting `md_steps_per_block: 2540` makes the 3D MD physical time per block
 (route b) equal the 1D cohesin clock per tick (route a) at **1 tick = 16 s**.
 With these numbers a paused-RNAPII pause of `1/pause_release_prob` ticks and an
 elongation rate of `elongation_step_prob` kb per 16 s convert straight to
-minutes and kb/min (see `scripts/nascent_rna_abundance.py`, which derives
-`tick_seconds` from `md_steps_per_block`).
+minutes and kb/min. New calibrated configs should set `lef.tick_seconds`
+explicitly; reporting scripts use that value when present.
 
 ### Putting It Together
 

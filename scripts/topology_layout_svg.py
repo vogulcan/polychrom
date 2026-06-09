@@ -80,9 +80,13 @@ def _gene_stats(cfg, bp_per_site: int) -> Tuple[List[dict], float]:
 
     Returns ``(rows, tick_seconds)``. Each row is a dict of display strings.
     No trajectory needed: rates come from the YAML gene specs converted to real
-    time via the cohesin clock (``2 * bp_per_site / V_COHESIN_BPS``).
+    time via ``lef.tick_seconds`` when present, else the cohesin clock
+    (``2 * bp_per_site / V_COHESIN_BPS``).
     """
-    tick_s = 2.0 * bp_per_site / V_COHESIN_BPS
+    tick_s = getattr(cfg.lef, "tick_seconds", None)
+    if tick_s is None:
+        tick_s = 2.0 * bp_per_site / V_COHESIN_BPS
+    tick_s = float(tick_s)
     kb_per_site = bp_per_site / 1000.0
     specs = cfg.lef.topology_kwargs.get("genes", []) or []
     rows: List[dict] = []
@@ -329,12 +333,16 @@ def build_svg(
         f'<text x="{pad_l}" y="34" font-size="17" font-weight="700" '
         f'fill="{C_TEXT}">Genome topology &#8212; {_esc(Path(config_path).stem)}</text>'
     )
+    tick_source = (
+        "config tick_seconds"
+        if getattr(lef_cfg, "tick_seconds", None) is not None
+        else f"cohesin clock: 2&#215;{bp_per_site} bp / {V_COHESIN_BPS} bp/s"
+    )
     sub = (
         f"{lef_cfg.num_chains} chain(s) &#215; {chain_length} sites "
         f"({_fmt_kb(chain_length * bp_per_site)} @ {bp_per_site} bp/site) "
         f"&#183; {len(genes)} genes &#183; {len(tads)} TADs "
-        f"&#183; 1 tick = {tick_s:.0f} s (cohesin clock: "
-        f"2&#215;{bp_per_site} bp / {V_COHESIN_BPS} bp/s)"
+        f"&#183; 1 tick = {tick_s:.0f} s ({tick_source})"
     )
     P.append(
         f'<text x="{pad_l}" y="53" font-size="11" fill="{C_TEXT_MUTE}">{sub}</text>'

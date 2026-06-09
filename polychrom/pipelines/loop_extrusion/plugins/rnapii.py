@@ -471,8 +471,8 @@ def stateful_translocate_rnapii(
       cohesin loss the restraint is relieved (faster release), which
       compensates for reduced recruitment and keeps steady-state output
       roughly constant (the cohesin-loss paradox). Default ``1.0`` = off.
-    * **ELONGATING**: attempt one ``+direction`` step with probability
-      ``gene.elongation_step_prob`` (sub-site biological speed).
+    * **ELONGATING**: attempt up to ``rnapii_stride`` ``+direction`` steps,
+      each with probability ``gene.elongation_step_prob``.
     """
     genes: List[Gene] = args["genes"]
     tol = int(args.get("ep_contact_tolerance", 2))
@@ -531,12 +531,16 @@ def stateful_translocate_rnapii(
             # fall through to elongation step this tick
 
         # state == STATE_ELONGATING / STATE_STALLED (entering or carried over).
-        # Rolling the speed dice and failing = slow but productive elongation
-        # (stays ELONGATING). Rolling it and being physically blocked = STALLED
-        # (cohesin / traffic / lesion); this keeps obstacle stalls out of the
-        # elongation metric and out of the %paused denominator downstream.
-        if np.random.random() < gene.elongation_step_prob:
-            advanced = _try_single_step(r, gene, occupied, args)
-            r.attrs["state"] = STATE_ELONGATING if advanced else STATE_STALLED
-        else:
-            r.attrs["state"] = STATE_ELONGATING
+        # A failed speed roll means slow but productive elongation; a failed
+        # physical move means a real obstacle stall.
+        stride = max(1, int(args.get("rnapii_stride", 1)))
+        stalled = False
+        for _ in range(stride):
+            if np.random.random() >= gene.elongation_step_prob:
+                continue
+            if not _try_single_step(r, gene, occupied, args):
+                stalled = True
+                break
+            if r.pos == gene.tes:
+                break
+        r.attrs["state"] = STATE_STALLED if stalled else STATE_ELONGATING
