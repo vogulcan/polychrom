@@ -1,0 +1,7 @@
+metric	metric_label	test	n_config1	n_config2	baseline_mean_raw	comparison_mean_raw	mean_difference_raw	mean_fold_vs_baseline_mean	p_value	significance
+boundary_pass_event	Boundary pass events	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.0020309348800773373	0.0020309348800773373	0.0	1.0	1.0	ns
+cross_tad_occupancy	Cross-boundary occupancy	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.47354666666666667	0.4845574999999999	0.011010833333333248	1.023251844239216	0.6233302301413757	ns
+crossed_boundaries	Boundary-counted crossing	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.48225999999999997	0.5013341666666667	0.01907416666666678	1.0395516249879042	0.4628591223018468	ns
+multi_tad_crossing	Multi-TAD crossing	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.008300000000000002	0.016575	0.008274999999999998	1.9969879518072287	0.16903375262508388	ns
+one_ctcf_leg_stripe	One CTCF-leg stripe	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.5660641666666667	0.7268033333333332	0.16073916666666654	1.283959268457492	0.00019485158804044252	***
+boundary_crossing_stripe	Boundary-crossing stripe	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.06078416666666666	0.09541	0.034625833333333335	1.5696521846423823	0.004957890406806815	**

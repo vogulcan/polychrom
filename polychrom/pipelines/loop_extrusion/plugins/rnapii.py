@@ -38,6 +38,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
+from .lesions import lesion_blocks_rnapii
+
 FREE = 0
 COHESIN = 1
 RNAPII_CELL = 2
@@ -331,17 +333,24 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
     :func:`_resolve_head_on`. On TES arrival the RNAPII steps into the
     TES slot even if a cohesin sits there (bypass slot).
     """
+    # Reset first; set again below only if actually lesion-blocked this step, so
+    # the flag reflects the *current* obstacle (used for evict-on-repair).
+    r.attrs["lesion_stalled"] = False
     rnapii_by_pos = args["rnapii_by_pos"]
     target = r.pos + r.direction
     if not _valid_step(r.pos, target, args):
         return False
 
-    # A lesion blocks RNAPII -- it cannot transcribe through the damage and
-    # stalls just upstream (lesion-stalled Pol II).
+    # A lesion blocks RNAPII per its type/state (Type A in pre-recognition, or
+    # any lesion under repair) -- the polymerase cannot transcribe through and
+    # stalls just upstream (lesion-stalled Pol II). A Type-B pre-recognition
+    # lesion is read through (lesion_blocks_rnapii is False).
     lesions = args.get("lesions")
-    if lesions and target in lesions:
-        r.attrs["lesion_stalled"] = True
-        return False
+    if lesions:
+        les = lesions.get(target)
+        if les is not None and lesion_blocks_rnapii(les):
+            r.attrs["lesion_stalled"] = True
+            return False
 
     if target == gene.tes:
         # TES is a normal occupiable slot: a terminating Pol II dwelling here must
@@ -401,13 +410,37 @@ def _try_single_step(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) ->
     return True
 
 
+def _unload(r: RNAPII, occupied: np.ndarray, args: Dict) -> None:
+    """Remove an RNAPII from the lattice: free its cell (unless a tunnelling
+    cohesin masks it) and drop its ``rnapii_by_pos`` bookkeeping entry."""
+    if occupied[r.pos] == RNAPII_CELL:
+        occupied[r.pos] = FREE
+    args["rnapii_by_pos"].pop(r.pos, None)
+
+
 def _unload_at_tes(r: RNAPII, gene: Gene, occupied: np.ndarray, args: Dict) -> bool:
     """If the RNAPII sits at its TES, clear it and return True."""
     if r.pos != gene.tes:
         return False
-    if occupied[r.pos] == RNAPII_CELL:
-        occupied[r.pos] = FREE
-    args["rnapii_by_pos"].pop(r.pos, None)
+    _unload(r, occupied, args)
+    return True
+
+
+def _evict_if_lesion_repaired(
+    r: RNAPII, occupied: np.ndarray, args: Dict, lesions: Dict
+) -> bool:
+    """Evict (not resume) an RNAPII that was stalled by a lesion which has since
+    been repaired. Returns True if the RNAPII was removed from the lattice.
+
+    The polymerase stalled one step upstream of the damage, so its blocking
+    lesion sat at ``r.pos + r.direction``; if that site no longer carries a
+    lesion, the damage was repaired and the lesion-stalled Pol II is evicted.
+    """
+    if not r.attrs.get("lesion_stalled"):
+        return False
+    if (r.pos + r.direction) in lesions:
+        return False
+    _unload(r, occupied, args)
     return True
 
 
@@ -424,10 +457,14 @@ def translocate_rnapii(
     """v1 RNAPII dynamics: single state, integer stride per tick."""
     genes: List[Gene] = args["genes"]
     stride: int = int(args.get("rnapii_stride", 1))
+    lesions = args.get("lesions") or {}
 
     for idx in range(len(rnapiis) - 1, -1, -1):
         r = rnapiis[idx]
         gene = genes[r.gene_id]
+        if _evict_if_lesion_repaired(r, occupied, args, lesions):
+            del rnapiis[idx]
+            continue
         if _unload_at_tes(r, gene, occupied, args):
             del rnapiis[idx]
             continue
@@ -488,9 +525,17 @@ def stateful_translocate_rnapii(
         legs = [c.left.pos for c in cohesins] + [c.right.pos for c in cohesins]
         leg_positions = np.array(legs, dtype=np.int64) if legs else None
 
+    lesions = args.get("lesions") or {}
+
     for idx in range(len(rnapiis) - 1, -1, -1):
         r = rnapiis[idx]
         gene = genes[r.gene_id]
+
+        # A Pol II stalled by a lesion that has since been repaired is evicted,
+        # not resumed (lesions update before this phase, so the site is free now).
+        if _evict_if_lesion_repaired(r, occupied, args, lesions):
+            del rnapiis[idx]
+            continue
 
         # At TES: terminating Pol II dwells as a stationary block, then unloads.
         if r.pos == gene.tes:

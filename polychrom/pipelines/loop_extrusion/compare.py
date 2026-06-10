@@ -56,7 +56,7 @@ from .plugins.sampling import iterative_correction
 # comparison, as a fraction of the contact-map size. The large-s tail is
 # dominated by a handful of long-range contacts and is too noisy to compare;
 # curves are truncated here before AUC-normalization. Tune to taste.
-PS_3D_S_MAX_FRAC = 0.8
+PS_3D_S_MAX_FRAC = 1.0
 
 
 # ---------------------------------------------------------------------------

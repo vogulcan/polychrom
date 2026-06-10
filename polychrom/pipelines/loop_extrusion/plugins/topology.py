@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from ..config import LEFConfig
 from .rnapii import build_genes
-from .lesions import seed_periodic_lesions
+from .lesions import precompute_lesion_fields
 
 # Boundary strength is either a single value applied to every anchor, or a
 # per-anchor mapping {position: strength} keyed by the chain-relative site.
@@ -263,11 +263,13 @@ def gene_aware_topology(
     target_enhancers: bool = True,
     target_tss: bool = True,
     weight_loading_by_activity: bool = True,
-    lesion_prob: float = 0.0,
-    lesion_lifetime: int = 100,
+    lesion_spacing: int = 10,
     lesion_block_prob: float = 0.95,
-    lesion_max: int = 64,
-    lesion_spacing: int = 0,
+    lesion_type_a_prob: float = 0.5,
+    lesion_prerecognition_ticks: int = 100,
+    lesion_repair_ticks: int = 100,
+    lesion_tad_size_exponent: float = 1.0,
+    lesion_tad_repair_exponent: float = 1.0,
 ) -> Dict[str, Any]:
     """CTCF TAD layout + per-gene transcription units.
 
@@ -337,17 +339,29 @@ def gene_aware_topology(
         target_tss=target_tss,
         weight_by_activity=weight_loading_by_activity,
     )
-    # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
+    # Lesion (UV-damage) two-state machine -- see plugins.lesions. Population is
+    # homeostatic (lesion_spacing sets the steady-state count N // spacing) and
+    # placement is TAD-size-weighted; type & state govern cohesin / RNAPII
+    # blocking. Lesions actually appear only when the lesion plugin is enabled
+    # (it runs update_lesions, which fills + advances them); the fields below
+    # just arm the spawner. lesion_spacing == 0 disables lesions entirely.
     args["lesions"] = {}
-    args["lesion_prob"] = float(lesion_prob)
-    args["lesion_lifetime"] = int(lesion_lifetime)
     args["lesion_block_prob"] = float(lesion_block_prob)
-    args["lesion_max"] = int(lesion_max)
-    # Optional: deterministic CPD seeding -- a UV pulse depositing lesions at
-    # every ``lesion_spacing`` monomer in each gene body, persisting for
-    # lesion_lifetime ticks (set very large for permanent damage).
+    args["lesion_type_a_prob"] = float(lesion_type_a_prob)
+    args["lesion_prerecognition_ticks"] = int(lesion_prerecognition_ticks)
+    args["lesion_repair_ticks"] = int(lesion_repair_ticks)
+    args["lesion_spacing"] = int(lesion_spacing)
+    args["lesion_tad_size_exponent"] = float(lesion_tad_size_exponent)
+    args["lesion_tad_repair_exponent"] = float(lesion_tad_repair_exponent)
     if lesion_spacing > 0:
-        seed_periodic_lesions(args, int(lesion_spacing), int(lesion_lifetime))
+        precompute_lesion_fields(
+            args,
+            tad_positions=tad_positions,
+            gene_objs=gene_objs,
+            tad_size_exponent=lesion_tad_size_exponent,
+            tad_repair_exponent=lesion_tad_repair_exponent,
+            spacing=lesion_spacing,
+        )
     return args
 
 
@@ -380,11 +394,13 @@ def gene_aware_convergent_tad_topology(
     target_enhancers: bool = True,
     target_tss: bool = True,
     weight_loading_by_activity: bool = True,
-    lesion_prob: float = 0.0,
-    lesion_lifetime: int = 100,
+    lesion_spacing: int = 10,
     lesion_block_prob: float = 0.95,
-    lesion_max: int = 64,
-    lesion_spacing: int = 0,
+    lesion_type_a_prob: float = 0.5,
+    lesion_prerecognition_ticks: int = 100,
+    lesion_repair_ticks: int = 100,
+    lesion_tad_size_exponent: float = 1.0,
+    lesion_tad_repair_exponent: float = 1.0,
 ) -> Dict[str, Any]:
     """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
     args = convergent_tad_topology(
@@ -446,17 +462,29 @@ def gene_aware_convergent_tad_topology(
         target_tss=target_tss,
         weight_by_activity=weight_loading_by_activity,
     )
-    # Lesion (UV-damage) state + parameters, consumed by lesions.update_lesions.
+    # Lesion (UV-damage) two-state machine -- see plugins.lesions. Population is
+    # homeostatic (lesion_spacing sets the steady-state count N // spacing) and
+    # placement is TAD-size-weighted; type & state govern cohesin / RNAPII
+    # blocking. Lesions actually appear only when the lesion plugin is enabled
+    # (it runs update_lesions, which fills + advances them); the fields below
+    # just arm the spawner. lesion_spacing == 0 disables lesions entirely.
     args["lesions"] = {}
-    args["lesion_prob"] = float(lesion_prob)
-    args["lesion_lifetime"] = int(lesion_lifetime)
     args["lesion_block_prob"] = float(lesion_block_prob)
-    args["lesion_max"] = int(lesion_max)
-    # Optional: deterministic CPD seeding -- a UV pulse depositing lesions at
-    # every ``lesion_spacing`` monomer in each gene body, persisting for
-    # lesion_lifetime ticks (set very large for permanent damage).
+    args["lesion_type_a_prob"] = float(lesion_type_a_prob)
+    args["lesion_prerecognition_ticks"] = int(lesion_prerecognition_ticks)
+    args["lesion_repair_ticks"] = int(lesion_repair_ticks)
+    args["lesion_spacing"] = int(lesion_spacing)
+    args["lesion_tad_size_exponent"] = float(lesion_tad_size_exponent)
+    args["lesion_tad_repair_exponent"] = float(lesion_tad_repair_exponent)
     if lesion_spacing > 0:
-        seed_periodic_lesions(args, int(lesion_spacing), int(lesion_lifetime))
+        precompute_lesion_fields(
+            args,
+            tad_positions=tad_positions,
+            gene_objs=gene_objs,
+            tad_size_exponent=lesion_tad_size_exponent,
+            tad_repair_exponent=lesion_tad_repair_exponent,
+            spacing=lesion_spacing,
+        )
     return args
 
 

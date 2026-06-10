@@ -108,6 +108,45 @@ def test_variable_tick_25s_uses_fractional_multistep_rnapii(tmp_path):
     assert gene["elongation_step_prob"] == pytest.approx(2.5 / 3)
 
 
+def test_variable_tick_config4_defaults_use_phenotype_lesion_regime(tmp_path):
+    subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--out-dir",
+            str(tmp_path),
+            "--tick-seconds",
+            "8",
+            "--chain",
+            "5000",
+            "--num-chains",
+            "2",
+            "--suffix",
+            "phenotype",
+        ],
+        check=True,
+    )
+
+    cfg2 = yaml.safe_load((tmp_path / "config2_phenotype.yaml").read_text())
+    cfg3 = yaml.safe_load((tmp_path / "config3_phenotype.yaml").read_text())
+    cfg4 = yaml.safe_load((tmp_path / "config4_phenotype.yaml").read_text())
+    topo2 = _topology(cfg2)
+    topo3 = _topology(cfg3)
+    topo4 = _topology(cfg4)
+
+    for site, strength in topo2["boundary_strength"].items():
+        assert topo3["boundary_strength"][site] == pytest.approx(
+            round(min(strength * 3.0, 1.0), 2)
+        )
+
+    assert cfg4["lef"]["plugins"]["lesion"].endswith(":update_lesions")
+    assert topo4["lesion_spacing"] == 10
+    assert topo4["lesion_type_a_prob"] == pytest.approx(0.25)
+    assert topo4["lesion_prerecognition_ticks"] == 150
+    assert topo4["lesion_repair_ticks"] == 38
+    assert topo4["lesion_block_prob"] == pytest.approx(0.97)
+
+
 def test_variable_tick_allows_duration_overrides(tmp_path):
     subprocess.run(
         [

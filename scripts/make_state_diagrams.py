@@ -6,10 +6,12 @@ Outputs (docs/figs/):
   rnapii_state_machine.svg        - RNAPII POISED->PAUSED->ELONGATING<->STALLED->TERMINATING
   cohesin_state_machine.svg       - cohesin leg EXTRUDING<->STALLED / CTCF-captured
   rnapii_cohesin_interaction.svg  - collision resolution + pause-release coupling
+  lesion_state_machine.svg        - DNA-lesion PRE-RECOGNITION->REPAIR->repaired,
+                                    type A/B assignment + cohesin/RNAPII interaction matrix
 
 The transition labels and probabilities mirror the engine
-(polychrom/pipelines/loop_extrusion/plugins/{rnapii,lef_dynamics}.py). RNAPII
-state fills match the trajectory viewer palette (_viewer_template.py).
+(polychrom/pipelines/loop_extrusion/plugins/{rnapii,lef_dynamics,lesions}.py).
+RNAPII state fills match the trajectory viewer palette (_viewer_template.py).
 
 Run:  python scripts/make_state_diagrams.py
 """
@@ -60,6 +62,14 @@ def load_params(path: str) -> dict:
         "lifetime_stalled": ls,
         "lifetime_rnapii_stalled": g("lifetime_rnapii_stalled", ls),
         "lifetime_ctcf": lc if lc is not None else getattr(cfg.lef, "lifetime", None),
+        # Lesion (UV-damage) machine knobs (config4); absent (None) for config1/2/3.
+        "lesion_spacing": g("lesion_spacing"),
+        "lesion_type_a_prob": g("lesion_type_a_prob"),
+        "lesion_prerecognition_ticks": g("lesion_prerecognition_ticks"),
+        "lesion_repair_ticks": g("lesion_repair_ticks"),
+        "lesion_block_prob": g("lesion_block_prob"),
+        "lesion_tad_size_exponent": g("lesion_tad_size_exponent"),
+        "lesion_tad_repair_exponent": g("lesion_tad_repair_exponent"),
         "src": Path(path).name,
     }
 
@@ -76,6 +86,11 @@ COHESIN = {
     "EXTRUDING":     ("#0e7490", "#155e75"),
     "STALLED":       ("#b45309", "#7c2d12"),
     "CTCF_CAPTURED": ("#6d28d9", "#4c1d95"),
+}
+# Lesion state fills: PRE-RECOGNITION (amber) -> REPAIR (teal).
+LESION = {
+    "PRE":    ("#d97706", "#92400e"),
+    "REPAIR": ("#0891b2", "#155e75"),
 }
 INK = "#1f2937"        # primary text / generic stroke
 MUTED = "#6b7280"      # captions
@@ -258,6 +273,11 @@ def fig_rnapii():
            "pos = TES", curve=70, label_size=11, label_at=(600, 690))
     s.edge(edge_pt(term, "bottom"), (cx, 790), "termination_prob")
 
+    # A lesion-stalled Pol II is evicted (not resumed) once its lesion is repaired.
+    s.end_dot(stall[0], 800)
+    s.edge((stall[0], stall[1] + NH / 2), (stall[0], 790),
+           "lesion repaired → evicted", label_size=11)
+
     # footnotes
     fy = 860
     s.text(40, fy, "*  load_prob × enh_factor   (enh_factor applied only if "
@@ -269,13 +289,16 @@ def fig_rnapii():
     s.text(40, fy + 44, "Non-ELONGATING states are stationary blocks to cohesin; "
            "only ELONGATING can push a cohesin leg.", size=12, anchor="start",
            fill=MUTED, italic=True)
+    s.text(40, fy + 66, "A lesion blocks RNAPII (Type-A pre-recognition, or any "
+           "repair-state lesion) -> STALLED; the Pol II is then evicted when that "
+           "lesion is repaired.", size=12, anchor="start", fill=MUTED, italic=True)
     s.save("rnapii_state_machine.svg")
 
 
 # --- Figure 2: cohesin -------------------------------------------------------
 
 def fig_cohesin():
-    s = SVG(1080, 600, "Cohesin (per-leg) state machine")
+    s = SVG(1080, 664, "Cohesin (per-leg) state machine")
     NW, NH = 184, 64
     yc = 300
     ext = s.node(540, yc, NW, NH, "EXTRUDING", *COHESIN["EXTRUDING"],
@@ -321,6 +344,14 @@ def fig_cohesin():
     s.text(40, fy + 20, "Each leg extrudes independently; on unload a fresh "
            "cohesin reloads to keep the count constant.", size=12,
            anchor="start", fill=MUTED, italic=True)
+    s.text(40, fy + 44, "A DNA lesion is another obstacle: an eligible lesion "
+           "(Type-A pre-recognition with no Pol II present, or any repair-state "
+           "lesion) stalls the leg with prob lesion_block_prob.", size=12,
+           anchor="start", fill=MUTED)
+    s.text(40, fy + 62, "A Type-A pre-recognition intrinsic stall sets the "
+           "rnapii_stalled flag (fast eviction, †); with RNAPII present the stalled "
+           "Pol II does the blocking, not the lesion directly.", size=12,
+           anchor="start", fill=MUTED)
     s.save("cohesin_state_machine.svg")
 
 
@@ -487,6 +518,128 @@ def fig_interaction():
     s.save("rnapii_cohesin_interaction.svg")
 
 
+# --- Figure 4: lesions -------------------------------------------------------
+
+def fig_lesion():
+    s = SVG(1060, 720, "DNA-lesion (UV-damage) state machine")
+    s.text(530, 58,
+           "Each lesion spawns with a fixed type, runs PRE-RECOGNITION -> REPAIR "
+           "-> repaired, and the population is held at N // lesion_spacing by refill.",
+           size=12.5, fill=MUTED, italic=True)
+
+    # local helpers (kept figure-local, mirroring fig_interaction)
+    def box(cx, cy, w, h, label, size=12, fill="#eef2ff", stroke="#3730a3"):
+        x, y = cx - w / 2, cy - h / 2
+        s.add(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w}" height="{h}" rx="9" '
+              f'fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>')
+        lines = label.split("|")
+        for i, ln in enumerate(lines):
+            dy = (i - (len(lines) - 1) / 2) * 17 + 4
+            s.text(cx, cy + dy, ln, size=size, fill=INK)
+        return (cx, cy, w, h)
+
+    def vlist(x, y, w, title, rows, rowh=21):
+        h = 30 + rowh * len(rows)
+        s.add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" '
+              f'fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4"/>')
+        s.text(x + 12, y + 20, title, size=11.5, weight="700", anchor="start", fill=INK)
+        for i, (k, v) in enumerate(rows):
+            yy = y + 40 + i * rowh
+            s.text(x + 12, yy, k, size=11, anchor="start", fill=MUTED)
+            s.text(x + w - 12, yy, v, size=11, anchor="end", weight="700", fill=INK)
+        return (x, y, w, h)
+
+    def itable(x, y, w, rows, rowh=27):
+        head = ("type · state", "blocks RNAPII", "stalls cohesin")
+        c0, c1, c2 = x + 14, x + w * 0.42, x + w * 0.70
+        h = 34 + rowh * len(rows)
+        s.add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="9" '
+              f'fill="#ffffff" stroke="#e5e7eb" stroke-width="1.4"/>')
+        for cx_, t in ((c0, head[0]), (c1, head[1]), (c2, head[2])):
+            s.text(cx_, y + 21, t, size=11, weight="700", anchor="start", fill=INK)
+        s.add(f'<line x1="{x + 10:.1f}" y1="{y + 30}" x2="{x + w - 10:.1f}" '
+              f'y2="{y + 30}" stroke="#e5e7eb" stroke-width="1"/>')
+
+        def clr(v):
+            return "#065f46" if v.startswith("yes") else (MUTED if v == "no" else INK)
+        for i, (a, b, c) in enumerate(rows):
+            yy = y + 34 + i * rowh + 14
+            s.text(c0, yy, a, size=11, anchor="start", weight="700", fill=INK)
+            s.text(c1, yy, b, size=11, anchor="start", fill=clr(b))
+            s.text(c2, yy, c, size=11, anchor="start", fill=clr(c))
+        return (x, y, w, h)
+
+    # --- state machine (left column) ---
+    NW, NH = 210, 64
+    cx = 250
+    pre = s.node(cx, 240, NW, NH, "PRE-RECOGNITION", *LESION["PRE"],
+                 sub="damage unmarked", code=0)
+    rep = s.node(cx, 470, NW, NH, "REPAIR", *LESION["REPAIR"],
+                 sub="machinery bound", code=1)
+    s.start_dot(cx, 100)
+    s.end_dot(cx, 640)
+
+    tau_pre = val("lesion_prerecognition_ticks", "τ_pre")
+    tau_rep = val("lesion_repair_ticks", "τ_rep")
+    s.edge((cx, 108), edge_pt(pre, "top"), "spawn")
+    s.edge(edge_pt(pre, "bottom"), edge_pt(rep, "top"),
+           f"recognise · 1/{tau_pre}", label_size=11)
+    s.edge(edge_pt(rep, "bottom"), (cx, 632),
+           f"repair · 1/{tau_rep}", label_size=11)
+    s.self_loop(pre, "right", "stay")
+    s.self_loop(rep, "right", "stay")
+    s.text(cx, 662, "repaired → removed", size=11, fill=MUTED)
+
+    # homeostatic refill feedback (far left, dashed)
+    s.add(f'<path d="M235,646 C95,560 95,200 235,106" fill="none" '
+          f'stroke="{MUTED}" stroke-width="1.6" stroke-dasharray="5,4" '
+          f'marker-end="url(#arrow)"/>')
+    s.text(96, 374, "homeostatic", size=10.5, anchor="middle", fill=MUTED)
+    s.text(96, 388, "refill", size=10.5, anchor="middle", fill=MUTED)
+
+    # --- type assignment + interaction matrix (right column) ---
+    box(800, 150, 470, 86,
+        "Type assigned at spawn (fixed for life):|"
+        "in a gene body → Type A (p = type_a_prob) else Type B|"
+        "off any gene body → always Type B",
+        size=12, fill="#fdf4ff", stroke="#86198f")
+    s.text(568, 226, "What each (type · state) does:", size=12, weight="700",
+           anchor="start", fill=INK)
+    itable(568, 236, 470, [
+        ("Type A · pre", "yes", "via Pol II / intrinsic †"),
+        ("Type B · pre", "no", "no"),
+        ("Type A · repair", "yes", "yes ‡"),
+        ("Type B · repair", "yes", "yes ‡"),
+    ])
+    src = (PARAMS or {}).get("src")
+    vlist(568, 392, 470,
+          "parameters" + (f"  (from {src})" if src else "  (symbolic — pass a config)"),
+          [
+              ("lesion_spacing  (hold N // spacing)", val("lesion_spacing", "—")),
+              ("lesion_type_a_prob", val("lesion_type_a_prob", "—")),
+              ("lesion_prerecognition_ticks  (τ_pre)", val("lesion_prerecognition_ticks", "—")),
+              ("lesion_repair_ticks  (τ_rep)", val("lesion_repair_ticks", "—")),
+              ("lesion_block_prob", val("lesion_block_prob", "—")),
+              ("lesion_tad_size_exponent  (α)", val("lesion_tad_size_exponent", "—")),
+              ("lesion_tad_repair_exponent  (β)", val("lesion_tad_repair_exponent", "—")),
+          ])
+
+    # footnotes
+    fy = 600
+    s.text(40, fy, "†  Type-A pre-recognition: a real stalled Pol II blocks "
+           "cohesin when RNAPII is in the model; with no RNAPII the lesion stalls "
+           "the leg itself (rnapii_stalled → fast eviction).",
+           size=11.5, anchor="start", fill=MUTED)
+    s.text(40, fy + 20, "‡  stalls an incoming cohesin leg with probability "
+           "lesion_block_prob. A lesion-stalled Pol II is evicted when the lesion "
+           "is repaired.", size=11.5, anchor="start", fill=MUTED)
+    s.text(40, fy + 44, "Shorter TADs carry MORE lesions (placement ∝ "
+           "L_TAD^(−α)) but recognise & repair them FASTER "
+           "(both rates × (L_mean / L_TAD)^β).",
+           size=12, anchor="start", fill=MUTED, italic=True)
+    s.save("lesion_state_machine.svg")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -505,3 +658,4 @@ if __name__ == "__main__":
     fig_rnapii()
     fig_cohesin()
     fig_interaction()
+    fig_lesion()

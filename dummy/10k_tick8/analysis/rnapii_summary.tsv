@@ -1,4 +1,0 @@
-label	frames_with_any_polii_pct	mean_count_all_frames	mean_count_when_present	max_simultaneous	capacity	capacity_used_max_pct	state_poised_pct	state_paused_pct	state_elongating_pct	state_terminating_pct	state_stalled_pct	elongation_speed_sites_per_tick	elongation_speed_kb_per_min	genes_recorded	active_genes_nascent_ge_1	total_completed_transcripts	completed_transcripts_per_recording_hour	cohesin_leg_signed_gene_displacement
-config1	100.0	649.4085317460317	649.4085317460317	790	3412	23.153575615474796	1.2912645277443648	21.79743431573928	27.619301935002515	27.243802536231332	22.04819668528251	0.7085102117750295	5.313826588312721	480	102	86642	1289.3154761904761	0.030944139794060695
-config2																		
-config3																		

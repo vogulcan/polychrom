@@ -3,8 +3,9 @@ outfolder=runs_test
 
 configs_arr=(
   /home/ogulcan/polychrom/configs_test/config1_${suffix}.yaml
-  /home/ogulcan/polychrom/configs_test/config2_${suffix}.yaml
-  /home/ogulcan/polychrom/configs_test/config3_${suffix}.yaml
+  # /home/ogulcan/polychrom/configs_test/config2_${suffix}.yaml
+  # /home/ogulcan/polychrom/configs_test/config3_${suffix}.yaml
+  /home/ogulcan/polychrom/configs_test/config4_${suffix}.yaml
 )
 
 for config in "${configs_arr[@]}"; do
@@ -22,3 +23,8 @@ PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extr
 
 PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extrusion.cli compare --cutoffs 2 --out ${outfolder}/${suffix}_2_3 ${outfolder}/config2_${suffix} ${outfolder}/config3_${suffix}
 
+PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extrusion.cli compare --cutoffs 2 --out ${outfolder}/${suffix}_1_4 ${outfolder}/config1_${suffix} ${outfolder}/config4_${suffix}
+
+PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extrusion.cli compare --cutoffs 2 --out ${outfolder}/${suffix}_2_4 ${outfolder}/config2_${suffix} ${outfolder}/config4_${suffix}
+
+PYTHONPATH=. micromamba run -n polychrom python -m polychrom.pipelines.loop_extrusion.cli compare --cutoffs 2 --out ${outfolder}/${suffix}_3_4 ${outfolder}/config3_${suffix} ${outfolder}/config4_${suffix}

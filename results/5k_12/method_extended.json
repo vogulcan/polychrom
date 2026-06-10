@@ -1,0 +1,41 @@
+{
+  "config1_label": "config1",
+  "config2_label": "config2",
+  "config1_h5": "/home/ogulcan/polychrom/results/5k_12/config1/LEFPositions.h5",
+  "config2_h5": "/home/ogulcan/polychrom/results/5k_12/config2/LEFPositions.h5",
+  "config1_yaml": "configs/config1_5k.yaml",
+  "config2_yaml": "configs/config2_5k.yaml",
+  "normalization": "fold_vs_mean_raw_value_of_config1_replicate_chains_per_metric",
+  "statistical_test": "two-sided exact two-sample permutation test on raw per-chain values",
+  "significance_codes": {
+    "ns": "p >= 0.05",
+    "*": "p < 0.05",
+    "**": "p < 0.01",
+    "***": "p < 0.001"
+  },
+  "stripe_definition": "exactly one LEF leg at an internal convergent CTCF anchor site and the two legs occupy different TAD intervals; anchor status is inferred from position because H5 does not store CTCF flags",
+  "boundary_metric_definitions": {
+    "boundary_pass_event": "consecutive-frame leg step across an internal TAD boundary, p-1 <-> p, filtering unload/reload jumps",
+    "cross_tad_occupancy": "same-chain loop spans one or more TAD boundaries; each loop-frame counts once",
+    "crossed_boundaries": "same-chain loop spans one or more TAD boundaries; a loop spanning k boundaries counts k",
+    "multi_tad_crossing": "same-chain loop spans at least two TAD boundaries",
+    "one_ctcf_leg_stripe": "exactly one leg is at an inferred CTCF anchor, regardless of whether the loop crosses a boundary",
+    "boundary_crossing_stripe": "exactly one leg is at an inferred CTCF anchor and the loop spans at least one TAD boundary"
+  },
+  "loop_length_definition": "same-chain LEF span in kb because 1 monomer = 1 kb",
+  "core_baseline_means": {
+    "boundary_crossing_stripe": 0.06078416666666666,
+    "boundary_pass_event": 0.0020309348800773373,
+    "cohesin_ctcf_boundary": 0.31605791666666666,
+    "cohesin_gene_body": 0.007350677802762609,
+    "mean_loop_length": 240.23256173692707
+  },
+  "boundary_baseline_means": {
+    "boundary_crossing_stripe": 0.06078416666666666,
+    "boundary_pass_event": 0.0020309348800773373,
+    "cross_tad_occupancy": 0.47354666666666667,
+    "crossed_boundaries": 0.48225999999999997,
+    "multi_tad_crossing": 0.0083,
+    "one_ctcf_leg_stripe": 0.5660641666666667
+  }
+}

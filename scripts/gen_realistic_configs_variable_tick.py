@@ -16,8 +16,10 @@ Gene classes (per user's regulatory-architecture table):
   hk_const 45%  hk_high 10%  celltype 30%  developmental 15%
 
 config1 = txn ON, config2 = txn OFF, config3 = txn OFF + stronger CTCF
-capture. Deterministic (seeded). This script intentionally does not replace
-``gen_realistic_configs_20s.py``; that remains the fixed 20 s reference.
+capture, config4 = config3 + UV lesions (a typed two-state repair machine:
+shorter TADs carry MORE lesions but recognise/repair them FASTER; longer TADs
+fewer + slower). Deterministic (seeded). This script intentionally does not
+replace ``gen_realistic_configs_20s.py``; that remains the fixed 20 s reference.
 
 CALIBRATION: ``--tick-seconds`` sets the biological time represented by one 1D
 lattice update. Biological lifetimes/rates are kept fixed and converted to
@@ -29,7 +31,7 @@ COHESIN:
   * free/extruding residence is fixed at 25 min and converted to ticks.
     CTCF-stalled lifetime is 4x the base lifetime.
   * CTCF capture strengths are centered near the Gabriele best fit
-    pstall = 1/8 with boost b = 4; config3 doubles these strengths.
+    pstall = 1/8 with boost b = 4; config3 strengthens these further.
   * loading ~98% uniform (targeted_load_prob 0.02). target_tss FALSE (Banigan 2023:
     no preferential TSS loading); target_enhancers TRUE (Kagey 2010 / Fursova 2024).
     cohesin@genes is barrier-driven (RNAPII pinning, Busslinger 2017), not loading.
@@ -67,6 +69,14 @@ RNAP_UNPAUSE_RATE = 0.002
 RNAP_UNBIND_RATE = 0.002
 RNAP_SPEED_KB_PER_SECOND = 0.1
 RNAP_BYPASS_SECONDS = 100.0
+
+# Lesion (UV-damage) two-state machine (config4 only): biological stage durations
+# in seconds, converted to ticks per --tick-seconds. These are the means at an
+# AVERAGE-sized TAD; lesion_tad_repair_exponent makes both stages faster in
+# shorter TADs and slower in longer ones, and lesion_tad_size_exponent makes
+# shorter TADs carry more lesions. See plugins/lesions.py.
+LESION_PRERECOGNITION_SECONDS = 1200.0
+LESION_REPAIR_SECONDS = 300.0
 
 # --- TAD-size targets (kb) --------------------------------------------------
 # Dense ("short") vs sparse ("long") TAD median sizes. These are insulation-
@@ -372,7 +382,7 @@ def fmt_gene(g):
     return "{" + ", ".join(parts) + "}"
 
 
-def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separation=240):
+def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separation=240, lesions=None):
     # Pol II cap and relaxation/recording scale with locus size & chain count
     max_rnapii = (max(64, int(2560 * (CHAIN / 30000) * (num_chains / 4))) if txn_on else 0)
     lifetime = calibration["lifetime"]
@@ -385,6 +395,27 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     bstr_block = "\n".join(f"      {b}: {s:.2f}" for b, s in zip(bounds, bstrength))
     gene_lines = "\n".join(f"      - {fmt_gene(g)}" for g in genes)
     tad_pos = "[" + ", ".join(str(b) for b in bounds) + "]"
+    # Lesion block: when ``lesions`` is given (config4) emit the full UV-damage
+    # knob set + enable the lesion plugin; otherwise lesions are off. (We always
+    # emit ``lesion_spacing`` -- never the retired ``lesion_prob`` -- so the
+    # topology plugin accepts the kwargs.)
+    if lesions:
+        ls = lesions
+        lesion_kwargs_block = "\n".join([
+            f"    lesion_spacing: {ls['spacing']}              # steady-state lesions = num_sites // spacing",
+            f"    lesion_type_a_prob: {ls['type_a_prob']}      # P(Type A | in a gene body); off-gene always Type B",
+            f"    lesion_prerecognition_ticks: {ls['prerecognition_ticks']}   # ~{ls['prerecognition_seconds']:g}s mean at an average-sized TAD",
+            f"    lesion_repair_ticks: {ls['repair_ticks']}            # ~{ls['repair_seconds']:g}s mean at an average-sized TAD",
+            f"    lesion_block_prob: {ls['block_prob']}      # per-tick prob a stalling lesion blocks a cohesin leg",
+            f"    lesion_tad_size_exponent: {ls['tad_size_exponent']}   # L_TAD**(-alpha): shorter TADs carry MORE lesions",
+            f"    lesion_tad_repair_exponent: {ls['tad_repair_exponent']} # (L_mean/L_TAD)**beta: shorter TADs recognise/repair FASTER",
+        ])
+        lesion_plugin_line = (
+            "\n    lesion:      polychrom.pipelines.loop_extrusion.plugins.lesions:update_lesions"
+        )
+    else:
+        lesion_kwargs_block = "    lesion_spacing: 0            # lesions off (config1/2/3)"
+        lesion_plugin_line = ""
     return f"""lef:
   chain_length: {CHAIN}
   num_chains: {num_chains}
@@ -428,7 +459,7 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     target_enhancers: true     # keep: enhancer/NIPBL loading (Kagey 2010; Fursova 2024)
     target_tss: false          # Banigan 2023: no preferential TSS loading (artifact)
     weight_loading_by_activity: true
-    lesion_prob: 0.0
+{lesion_kwargs_block}
     genes:
 {gene_lines}
 
@@ -440,7 +471,7 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
     translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
     rnapii_load:        {rl}
-    rnapii_translocate: {rt}
+    rnapii_translocate: {rt}{lesion_plugin_line}
 
 viewer:
   enabled: false
@@ -543,8 +574,23 @@ def main():
                     help="number of recorded LEF trajectory steps; default preserves the 20 s generator's real duration")
     ap.add_argument("--warmup-steps", type=int, default=None,
                     help="discarded 1D warmup ticks; default preserves the 20 s generator's real duration")
-    ap.add_argument("--bstr-mult", type=float, default=2.0,
+    ap.add_argument("--bstr-mult", type=float, default=3.0,
                     help="config3 = config2 with all boundary strengths X times larger")
+    # config4 (= config3 + UV lesions) knobs
+    ap.add_argument("--lesion-spacing", type=int, default=10,
+                    help="config4: steady-state lesion count = num_sites // spacing (0 disables)")
+    ap.add_argument("--lesion-type-a-prob", type=float, default=0.25,
+                    help="config4: P(Type A | in a gene body); off-gene lesions are always Type B")
+    ap.add_argument("--lesion-prerecognition-seconds", type=float, default=LESION_PRERECOGNITION_SECONDS,
+                    help="config4: mean pre-recognition duration at an average-sized TAD")
+    ap.add_argument("--lesion-repair-seconds", type=float, default=LESION_REPAIR_SECONDS,
+                    help="config4: mean repair duration at an average-sized TAD")
+    ap.add_argument("--lesion-block-prob", type=float, default=0.97,
+                    help="config4: per-tick prob a stalling lesion blocks a cohesin leg")
+    ap.add_argument("--lesion-tad-size-exponent", type=float, default=1.0,
+                    help="config4: placement weight L_TAD**(-alpha); larger -> shorter TADs carry more lesions")
+    ap.add_argument("--lesion-tad-repair-exponent", type=float, default=1.0,
+                    help="config4: rate * (L_mean/L_TAD)**beta; larger -> shorter TADs recognise/repair faster")
 
     args = ap.parse_args()
     CHAIN = int(args.chain)
@@ -582,6 +628,22 @@ def main():
     # X times larger (--bstr-mult). Stronger insulation, same domain skeleton/genes.
     bstrength_x = np.round(np.minimum(bstrength * args.bstr_mult, 1.0), 2)
     (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation))
+    # config4 = config3 (txn OFF, stronger CTCF) + UV lesions. Stage durations are
+    # biological seconds converted to ticks at this tick size; shorter TADs carry
+    # more lesions (size exponent) but recognise/repair them faster (repair exponent).
+    ts = calibration["tick_seconds"]
+    lesion_params = dict(
+        spacing=args.lesion_spacing,
+        type_a_prob=args.lesion_type_a_prob,
+        prerecognition_seconds=args.lesion_prerecognition_seconds,
+        repair_seconds=args.lesion_repair_seconds,
+        prerecognition_ticks=max(1, int(round(args.lesion_prerecognition_seconds / ts))),
+        repair_ticks=max(1, int(round(args.lesion_repair_seconds / ts))),
+        block_prob=args.lesion_block_prob,
+        tad_size_exponent=args.lesion_tad_size_exponent,
+        tad_repair_exponent=args.lesion_tad_repair_exponent,
+    )
+    (od / f"config4_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation, lesions=lesion_params))
     # stats
     lens = [abs(g["tes"] - g["tss"]) for g in genes]
     nenh = [len(g.get("enhancers", [])) for g in genes]
@@ -625,7 +687,14 @@ def main():
     print(f"E-P genes: {sum(1 for g in genes if g.get('enhancers'))}  enh/EPgene mean={np.mean([n for n in nenh if n]) if any(nenh) else 0:.1f}")
     print(f"genes/TAD: min={min(perTAD)} median={int(np.median(perTAD))} max={max(perTAD)}")
     print(f"  config3 boundary_strength (x{args.bstr_mult:g}): min={bstrength_x.min():.2f} median={np.median(bstrength_x):.2f} max={bstrength_x.max():.2f}")
-    print(f"wrote {od}/config1_{sfx}.yaml , config2_{sfx}.yaml , config3_{sfx}.yaml")
+    n_sites = CHAIN * args.num_chains
+    target = (n_sites // args.lesion_spacing) if args.lesion_spacing > 0 else 0
+    print(f"config4 lesions: spacing={args.lesion_spacing} -> ~{target} lesions held "
+          f"({100.0 * target / n_sites:.1f}% of {n_sites} sites); "
+          f"pre-recognition={lesion_params['prerecognition_ticks']} ticks (~{args.lesion_prerecognition_seconds:g}s), "
+          f"repair={lesion_params['repair_ticks']} ticks (~{args.lesion_repair_seconds:g}s); "
+          f"size_exp(alpha)={args.lesion_tad_size_exponent:g}, repair_exp(beta)={args.lesion_tad_repair_exponent:g}")
+    print(f"wrote {od}/config1_{sfx}.yaml , config2_{sfx}.yaml , config3_{sfx}.yaml , config4_{sfx}.yaml")
 
 
 if __name__ == "__main__":

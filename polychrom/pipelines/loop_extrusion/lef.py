@@ -103,6 +103,9 @@ def run(cfg: LEFConfig) -> Path:
 
     args = topology_fn(cfg, **cfg.topology_kwargs)
     args["num_chains"] = cfg.num_chains
+    # Lesion logic gates Type-A pre-recognition cohesin stalling on whether real
+    # RNAPII is in the model (if so, the stalled Pol II does the blocking).
+    args["rnapii_enabled"] = rnapii_enabled
 
     occupied, cohesins = initial_state(cfg, args, load_fn)
     rnapiis: list = []
@@ -183,15 +186,24 @@ def run(cfg: LEFConfig) -> Path:
                 fillvalue=-1,
             )
 
-        lesion_max = int(args.get("lesion_max", 64)) * cfg.num_chains
-        dset_lesions = None
-        if lesion_enabled:
+        # Lesion recording capacity = the homeostatic target (N // spacing); the
+        # population never exceeds it, so no truncation. Sites, types and states
+        # are recorded as parallel -1-padded datasets (cf. RNAPII positions/states).
+        lesion_cap = int(args.get("lesion_target", 0))
+        lesion_recorded = lesion_enabled and lesion_cap > 0
+        dset_lesions = dset_lesion_types = dset_lesion_states = None
+        if lesion_recorded:
             dset_lesions = fh.create_dataset(
-                "lesions",
-                shape=(traj_len, lesion_max),
-                dtype=np.int32,
-                compression="gzip",
-                fillvalue=-1,
+                "lesions", shape=(traj_len, lesion_cap), dtype=np.int32,
+                compression="gzip", fillvalue=-1,
+            )
+            dset_lesion_types = fh.create_dataset(
+                "lesion_types", shape=(traj_len, lesion_cap), dtype=np.int8,
+                compression="gzip", fillvalue=-1,
+            )
+            dset_lesion_states = fh.create_dataset(
+                "lesion_states", shape=(traj_len, lesion_cap), dtype=np.int8,
+                compression="gzip", fillvalue=-1,
             )
 
         rec_meter = ProgressMeter(traj_len, "lef:record")
@@ -216,8 +228,18 @@ def run(cfg: LEFConfig) -> Path:
                 else None
             )
             lbuf = (
-                np.full((n_step, lesion_max), -1, dtype=np.int32)
-                if lesion_enabled
+                np.full((n_step, lesion_cap), -1, dtype=np.int32)
+                if lesion_recorded
+                else None
+            )
+            ltbuf = (
+                np.full((n_step, lesion_cap), -1, dtype=np.int8)
+                if lesion_recorded
+                else None
+            )
+            lsbuf = (
+                np.full((n_step, lesion_cap), -1, dtype=np.int8)
+                if lesion_recorded
                 else None
             )
 
@@ -250,8 +272,12 @@ def run(cfg: LEFConfig) -> Path:
                         ibuf[i, j] = r.uid
 
                 if lbuf is not None:
-                    for j, site in enumerate(sorted(args["lesions"])[:lesion_max]):
+                    cur = args["lesions"]
+                    for j, site in enumerate(sorted(cur)[:lesion_cap]):
+                        les = cur[site]
                         lbuf[i, j] = site
+                        ltbuf[i, j] = les.ltype
+                        lsbuf[i, j] = les.state
 
                 rec_meter.update(start + i + 1)
 
@@ -262,6 +288,8 @@ def run(cfg: LEFConfig) -> Path:
                 dset_ids[start:end] = ibuf
             if dset_lesions is not None:
                 dset_lesions[start:end] = lbuf
+                dset_lesion_types[start:end] = ltbuf
+                dset_lesion_states[start:end] = lsbuf
 
         rec_meter.done()
 
@@ -277,10 +305,14 @@ def run(cfg: LEFConfig) -> Path:
             fh.attrs["seed"] = int(cfg.seed)
         fh.attrs["rnapii_enabled"] = bool(rnapii_enabled)
         fh.attrs["lesion_enabled"] = bool(lesion_enabled)
-        if lesion_enabled:
-            fh.attrs["lesion_max"] = lesion_max
-            fh.attrs["lesion_prob"] = float(args.get("lesion_prob", 0.0))
-            fh.attrs["lesion_lifetime"] = int(args.get("lesion_lifetime", 0))
+        if lesion_recorded:
+            fh.attrs["lesion_target"] = lesion_cap
+            fh.attrs["lesion_spacing"] = int(args.get("lesion_spacing", 0))
+            fh.attrs["lesion_type_a_prob"] = float(args.get("lesion_type_a_prob", 0.5))
+            fh.attrs["lesion_prerecognition_ticks"] = int(args.get("lesion_prerecognition_ticks", 0))
+            fh.attrs["lesion_repair_ticks"] = int(args.get("lesion_repair_ticks", 0))
+            fh.attrs["lesion_tad_size_exponent"] = float(args.get("lesion_tad_size_exponent", 1.0))
+            fh.attrs["lesion_tad_repair_exponent"] = float(args.get("lesion_tad_repair_exponent", 0.0))
             fh.attrs["lesion_block_prob"] = float(args.get("lesion_block_prob", 0.0))
         if rnapii_enabled:
             fh.attrs["max_rnapii"] = cfg.max_rnapii

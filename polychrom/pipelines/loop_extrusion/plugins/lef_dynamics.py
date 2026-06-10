@@ -13,6 +13,8 @@ from typing import Dict, List
 
 import numpy as np
 
+from .lesions import lesion_stalls_cohesin
+
 
 FREE = 0
 COHESIN = 1
@@ -299,6 +301,7 @@ def translocate_with_rnapii(
         occupied[p] = RNAPII_CELL if p in rnapii_by_pos else FREE
     lesions = args.get("lesions")
     lesion_block_prob = float(args.get("lesion_block_prob", 1.0))
+    rnapii_enabled = bool(args.get("rnapii_enabled", False))
 
     # 1. Unload + reload.
     for i in range(len(cohesins) - 1, -1, -1):
@@ -334,12 +337,20 @@ def translocate_with_rnapii(
                 leg.attrs["rnapii_stalled"] = False
                 continue
 
-            # A lesion blocks an incoming cohesin leg (per-tick stall prob).
-            # The other leg is unaffected, so the cohesin extrudes asymmetrically.
-            if lesions and target in lesions and np.random.random() < lesion_block_prob:
-                leg.attrs["stalled"] = True
-                leg.attrs["rnapii_stalled"] = False
-                continue
+            # A lesion may stall an incoming cohesin leg, depending on its type
+            # and state (see lesions.lesion_stalls_cohesin). Type-A pre-recognition
+            # lesions defer to a real stalled Pol II when RNAPII is in the model
+            # (rnapii_evict -> Pol II-style fast eviction); repair-state lesions
+            # stall generically. The other leg is unaffected, so the cohesin
+            # extrudes asymmetrically.
+            if lesions:
+                les = lesions.get(target)
+                if les is not None:
+                    stalls, rnapii_evict = lesion_stalls_cohesin(les, rnapii_enabled)
+                    if stalls and np.random.random() < lesion_block_prob:
+                        leg.attrs["stalled"] = True
+                        leg.attrs["rnapii_stalled"] = rnapii_evict
+                        continue
 
             cell = occupied[target]
 

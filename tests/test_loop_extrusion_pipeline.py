@@ -435,57 +435,206 @@ def test_terminating_pol_ii_blocks_cohesin():
     assert _rnapii_blocks_cohesin(r, {"rnapii_paused_block_prob": 1.0}) is True
 
 
-def test_lesion_repaired_after_lifetime():
-    from polychrom.pipelines.loop_extrusion.plugins.lesions import update_lesions
-    args = {"genes": [], "lesions": {50: 2}, "lesion_prob": 0.0}
-    update_lesions(args)
-    assert args["lesions"] == {50: 1}
-    update_lesions(args)
-    assert args["lesions"] == {}                     # fully repaired
+def test_lesion_population_holds_at_target():
+    """lesion_spacing sets the steady-state count N // spacing; the refill keeps
+    the population pinned at the target as repaired lesions are removed."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        precompute_lesion_fields, update_lesions,
+    )
+    gene = build_genes([{"tss": 20, "tes": 60}])[0]
+    args = {"N": 200, "chain_length": 200, "num_chains": 1, "genes": [gene],
+            "lesion_spacing": 10, "lesion_type_a_prob": 0.5,
+            "lesion_prerecognition_ticks": 5, "lesion_repair_ticks": 5}
+    precompute_lesion_fields(args, tad_positions=[100], gene_objs=[gene],
+                             tad_size_exponent=1.0, spacing=10)
+    assert args["lesion_target"] == 20
+    np.random.seed(0)
+    counts = []
+    for _ in range(60):
+        update_lesions(args)
+        counts.append(len(args["lesions"]))
+    assert all(c == 20 for c in counts)              # filled on tick 1, held thereafter
 
 
-def test_lesion_occurs_in_gene_body():
-    from polychrom.pipelines.loop_extrusion.plugins.lesions import update_lesions
-    gene = build_genes([{"tss": 10, "tes": 20}])[0]
-    args = {"genes": [gene], "lesions": {}, "lesion_prob": 1.0,
-            "lesion_lifetime": 5, "lesion_max": 1}
+def test_lesion_placement_weighted_by_tad_size():
+    """Per-site spawn prob ~ L_TAD**(-alpha): alpha=0 -> count proportional to TAD
+    length; alpha=1 -> ~equal expected count per TAD (shorter TADs denser)."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        precompute_lesion_fields, refill_lesions,
+    )
+    # One chain, two TADs: [0,100) length 100, [100,400) length 300.
+    def run(alpha):
+        args = {"N": 400, "chain_length": 400, "num_chains": 1, "genes": [],
+                "lesion_type_a_prob": 0.0}
+        precompute_lesion_fields(args, tad_positions=[100], gene_objs=[],
+                                 tad_size_exponent=alpha, spacing=8)   # target 50
+        np.random.seed(3)
+        small = big = 0
+        for _ in range(40):                          # many independent fills
+            args["lesions"] = {}
+            refill_lesions(args)
+            sites = np.array(sorted(args["lesions"]))
+            small += int((sites < 100).sum())
+            big += int((sites >= 100).sum())
+        return small, big
+
+    s0, b0 = run(0.0)
+    assert b0 > 2.0 * s0                             # ~3x more in the 3x-longer TAD
+    s1, b1 = run(1.0)
+    assert 0.7 < (s1 / b1) < 1.4                     # ~balanced count per TAD
+
+
+def test_lesion_type_assignment_gene_body_vs_outside():
+    """Gene-body lesion -> Type A w.p. lesion_type_a_prob else B; off gene body -> B."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        precompute_lesion_fields, _assign_type, LESION_TYPE_A, LESION_TYPE_B,
+    )
+    gene = build_genes([{"tss": 20, "tes": 40}])[0]   # gene body [20, 40]
+    args = {"N": 100, "chain_length": 100, "num_chains": 1, "lesion_type_a_prob": 0.5}
+    precompute_lesion_fields(args, tad_positions=[], gene_objs=[gene],
+                             tad_size_exponent=1.0, spacing=10)
+    np.random.seed(0)
+    assert all(_assign_type(s, args) == LESION_TYPE_B for s in (0, 5, 50, 99))
+    types = [_assign_type(30, args) for _ in range(400)]
+    assert all(t in (LESION_TYPE_A, LESION_TYPE_B) for t in types)
+    frac_a = sum(t == LESION_TYPE_A for t in types) / len(types)
+    assert 0.4 < frac_a < 0.6
+
+
+def test_lesion_state_machine_stochastic_transitions():
+    """PRE->REPAIR and REPAIR->removed fire at the configured 1/ticks rates."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        Lesion, update_lesions, LESION_TYPE_A, LESION_TYPE_B, LESION_PRE, LESION_REPAIR,
+    )
+    # Spawning off (target 0): observe transitions of a fixed cohort.
+    args = {"N": 1000, "lesion_target": 0, "lesion_site_p": None,
+            "lesion_prerecognition_ticks": 4, "lesion_repair_ticks": 1000,
+            "lesions": {s: Lesion(s, LESION_TYPE_A, LESION_PRE) for s in range(1000)}}
+    np.random.seed(0)
+    update_lesions(args)
+    n_repair = sum(l.state == LESION_REPAIR for l in args["lesions"].values())
+    assert 200 < n_repair < 300                      # ~1/4 advanced PRE->REPAIR
+    assert len(args["lesions"]) == 1000              # huge repair_ticks -> none removed
+
+    args2 = {"N": 1000, "lesion_target": 0, "lesion_site_p": None,
+             "lesion_prerecognition_ticks": 1000, "lesion_repair_ticks": 2,
+             "lesions": {s: Lesion(s, LESION_TYPE_B, LESION_REPAIR) for s in range(1000)}}
     np.random.seed(1)
-    update_lesions(args)
-    assert len(args["lesions"]) == 1
-    site = next(iter(args["lesions"]))
-    assert 10 <= site <= 20                          # inside the gene body
-    update_lesions(args)
-    assert len(args["lesions"]) <= 1                 # lesion_max respected
+    update_lesions(args2)
+    assert 400 < len(args2["lesions"]) < 600         # ~1/2 of REPAIR lesions repaired
 
 
-def test_lesion_blocks_cohesin_leg_asymmetrically():
-    occupied = np.zeros(40, dtype=np.int8)
-    left = Leg(10); right = Leg(11)
-    coh = Cohesin(left, right)
-    occupied[10] = COHESIN; occupied[11] = COHESIN
-    args = {"N": 40, "chain_length": 40, "num_chains": 1,
-            "ctcfCapture": {-1: {}, 1: {}}, "ctcfRelease": {-1: {}, 1: {}},
-            "rnapii_by_pos": {}, "tes_by_pos": {}, "cohesin_leg_by_pos": {10: left, 11: right},
-            "lesions": {9: 5}, "lesion_block_prob": 1.0}
-    translocate_with_rnapii([coh], occupied, args, unload_prob_fn=lambda *_: 0.0)
-    assert left.pos == 10 and left.attrs["stalled"]   # blocked by lesion at 9
-    assert right.pos == 12                            # other leg extruded -> asymmetric
+def test_lesion_cohesin_stall_matrix_without_rnapii():
+    """With no RNAPII in the model: Type-A pre stalls cohesin intrinsically (fast
+    eviction); Type-B pre does not; repair stalls generically (either type)."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        Lesion, LESION_TYPE_A, LESION_TYPE_B, LESION_PRE, LESION_REPAIR,
+    )
+
+    def step(les):
+        occupied = np.zeros(40, dtype=np.int8)
+        left = Leg(10); right = Leg(11)
+        occupied[10] = COHESIN; occupied[11] = COHESIN
+        args = {"N": 40, "chain_length": 40, "num_chains": 1,
+                "ctcfCapture": {-1: {}, 1: {}}, "ctcfRelease": {-1: {}, 1: {}},
+                "rnapii_by_pos": {}, "tes_by_pos": {},
+                "cohesin_leg_by_pos": {10: left, 11: right},
+                "lesions": {9: les}, "lesion_block_prob": 1.0, "rnapii_enabled": False}
+        translocate_with_rnapii([Cohesin(left, right)], occupied, args,
+                                unload_prob_fn=lambda *_: 0.0)
+        return left, right
+
+    left, right = step(Lesion(9, LESION_TYPE_A, LESION_PRE))
+    assert left.pos == 10 and left.attrs["stalled"] and left.attrs["rnapii_stalled"]
+    assert right.pos == 12                            # other leg extrudes -> asymmetric
+
+    left, right = step(Lesion(9, LESION_TYPE_B, LESION_PRE))
+    assert left.pos == 9 and not left.attrs.get("stalled")   # read through, no stall
+
+    for t in (LESION_TYPE_A, LESION_TYPE_B):
+        left, right = step(Lesion(9, t, LESION_REPAIR))
+        assert left.pos == 10 and left.attrs["stalled"] and not left.attrs["rnapii_stalled"]
 
 
-def test_lesion_stalls_rnapii():
-    gene = build_genes([{"tss": 10, "tes": 20, "elongation_step_prob": 1.0}])[0]
-    occupied = np.zeros(40, dtype=np.int8)
-    r = RNAPII(pos=14, gene_id=0, direction=1)
-    r.attrs["state"] = STATE_ELONGATING
-    occupied[14] = RNAPII_CELL
-    args = {"N": 40, "chain_length": 40, "num_chains": 1, "genes": [gene],
-            "rnapii_by_pos": {14: r}, "cohesin_leg_by_pos": {},
-            "lesions": {15: 5}, "ep_contact_tolerance": 1}
+def test_lesion_blocks_rnapii_by_type_state_and_evicts_on_repair():
+    """Type-A pre hard-blocks Pol II; Type-B pre is read through; a lesion-stalled
+    Pol II is evicted (not resumed) once its lesion is repaired."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        Lesion, LESION_TYPE_A, LESION_TYPE_B, LESION_PRE,
+    )
+
+    def setup(les):
+        gene = build_genes([{"tss": 10, "tes": 20, "elongation_step_prob": 1.0,
+                             "initiation_prob": 1.0, "pause_release_prob": 1.0}])[0]
+        occupied = np.zeros(40, dtype=np.int8)
+        r = RNAPII(pos=14, gene_id=0, direction=1)
+        r.attrs["state"] = STATE_ELONGATING
+        occupied[14] = RNAPII_CELL
+        args = {"N": 40, "chain_length": 40, "num_chains": 1, "genes": [gene],
+                "rnapii_by_pos": {14: r}, "cohesin_leg_by_pos": {},
+                "lesions": {15: les}, "ep_contact_tolerance": 1}
+        return r, occupied, args
+
+    r, occupied, args = setup(Lesion(15, LESION_TYPE_A, LESION_PRE))
     rnapiis = [r]
     for _ in range(5):
         stateful_translocate_rnapii(rnapiis, [], occupied, args)
-    assert r.pos == 14                                # cannot step onto lesion at 15
-    assert r.attrs.get("lesion_stalled")
+    assert r.pos == 14 and r.attrs.get("lesion_stalled")     # blocked just upstream
+
+    r, occupied, args = setup(Lesion(15, LESION_TYPE_B, LESION_PRE))
+    rnapiis = [r]
+    stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert r.pos == 15 and not r.attrs.get("lesion_stalled")  # read through onto site 15
+
+    r, occupied, args = setup(Lesion(15, LESION_TYPE_A, LESION_PRE))
+    rnapiis = [r]
+    stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert rnapiis and r.attrs.get("lesion_stalled")          # stalled at 14
+    del args["lesions"][15]                                   # lesion repaired
+    stateful_translocate_rnapii(rnapiis, [], occupied, args)
+    assert rnapiis == [] and occupied[14] == 0                # Pol II evicted
+
+
+def test_lesion_repair_faster_in_shorter_tads():
+    """lesion_tad_repair_exponent > 0 makes recognition (PRE->REPAIR) faster for
+    lesions in shorter TADs; exponent 0 recovers TAD-independent rates."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        precompute_lesion_fields, update_lesions, Lesion, LESION_TYPE_B,
+        LESION_PRE, LESION_REPAIR,
+    )
+
+    def mean_recognition_ticks(sites, beta, seed):
+        # short TAD [0,40) len 40, long TAD [40,400) len 360 -> L_ref = 200
+        args = {"N": 400, "chain_length": 400, "num_chains": 1,
+                "lesion_prerecognition_ticks": 8, "lesion_repair_ticks": 10**9}
+        precompute_lesion_fields(args, tad_positions=[40], gene_objs=[],
+                                 tad_size_exponent=0.0, spacing=0,
+                                 tad_repair_exponent=beta)
+        args["lesion_target"] = 0                    # no refill: the cohort just decays
+        args["lesions"] = {s: Lesion(s, LESION_TYPE_B, LESION_PRE) for s in sites}
+        np.random.seed(seed)
+        pending = set(sites)
+        recog = []
+        for t in range(1, 5000):
+            update_lesions(args)
+            for s in list(pending):
+                if args["lesions"][s].state == LESION_REPAIR:
+                    recog.append(t)
+                    pending.discard(s)
+            if not pending:
+                break
+        return float(np.mean(recog))
+
+    short = list(range(0, 40))
+    long = list(range(40, 400))
+    # beta = 1: short TAD recognised much faster (~1.6 vs ~14 ticks).
+    s1 = mean_recognition_ticks(short, 1.0, 0)
+    l1 = mean_recognition_ticks(long, 1.0, 1)
+    assert s1 * 2 < l1
+    # beta = 0: no TAD dependence -> comparable mean dwell (~8 ticks each).
+    s0 = mean_recognition_ticks(short, 0.0, 2)
+    l0 = mean_recognition_ticks(long, 0.0, 3)
+    assert 0.6 < (s0 / l0) < 1.6
 
 
 def test_load_targeted_places_near_loading_site():

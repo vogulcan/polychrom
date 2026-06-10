@@ -1,0 +1,13 @@
+config	metric	mean_raw	sd_raw	mean_fold	sd_fold	n_chains	metric_label	p_value	significance	test
+config1	boundary_crossing_stripe	0.06078416666666666	0.02223955346732317	1.0000000000000002	0.36587740997227636	10	Boundary-crossing stripe	0.004957890406806815	**	two-sided exact two-sample permutation test on raw per-chain values
+config1	boundary_pass_event	0.0020309348800773373	0.00022714629028999875	1.0	0.11184321689396026	10	Boundary pass events	1.0	ns	two-sided exact two-sample permutation test on raw per-chain values
+config1	cross_tad_occupancy	0.47354666666666667	0.03511414306529319	1.0	0.07415138894855805	10	Cross-boundary occupancy	0.6233302301413757	ns	two-sided exact two-sample permutation test on raw per-chain values
+config1	crossed_boundaries	0.48225999999999997	0.03673893022159409	1.0	0.07618075358021424	10	Boundary-counted crossing	0.4628591223018468	ns	two-sided exact two-sample permutation test on raw per-chain values
+config1	multi_tad_crossing	0.0083	0.009116992512289116	1.0	1.0984328328059174	10	Multi-TAD crossing	0.16903375262508388	ns	two-sided exact two-sample permutation test on raw per-chain values
+config1	one_ctcf_leg_stripe	0.5660641666666667	0.08358645761026923	1.0	0.14766251342577924	10	One CTCF-leg stripe	0.00019485158804044252	***	two-sided exact two-sample permutation test on raw per-chain values
+config2	boundary_crossing_stripe	0.09541	0.025013334036661918	1.5696521846423823	0.41151068458061046	10	Boundary-crossing stripe	0.004957890406806815	**	two-sided exact two-sample permutation test on raw per-chain values
+config2	boundary_pass_event	0.0020309348800773373	0.0002495815521259755	1.0	0.12288998262537669	10	Boundary pass events	1.0	ns	two-sided exact two-sample permutation test on raw per-chain values
+config2	cross_tad_occupancy	0.48455750000000003	0.06084959656403789	1.023251844239216	0.12849757130033904	10	Cross-boundary occupancy	0.6233302301413757	ns	two-sided exact two-sample permutation test on raw per-chain values
+config2	crossed_boundaries	0.5013341666666666	0.07056456629359883	1.0395516249879042	0.1463205870144711	10	Boundary-counted crossing	0.4628591223018468	ns	two-sided exact two-sample permutation test on raw per-chain values
+config2	multi_tad_crossing	0.016575	0.015683603433735076	1.9969879518072289	1.8895907751488044	10	Multi-TAD crossing	0.16903375262508388	ns	two-sided exact two-sample permutation test on raw per-chain values
+config2	one_ctcf_leg_stripe	0.7268033333333334	0.05810052261722833	1.2839592684574923	0.10263946393102373	10	One CTCF-leg stripe	0.00019485158804044252	***	two-sided exact two-sample permutation test on raw per-chain values

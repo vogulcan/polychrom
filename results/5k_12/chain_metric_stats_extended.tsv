@@ -1,0 +1,6 @@
+metric	metric_label	test	n_config1	n_config2	baseline_mean_raw	comparison_mean_raw	mean_difference_raw	mean_fold_vs_baseline_mean	p_value	significance
+cohesin_gene_body	Cohesin at gene bodies	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.007350677802762608	0.006739630581432702	-0.0006110472213299058	0.9168719895326853	0.00035722791140747797	***
+cohesin_ctcf_boundary	Cohesin at CTCF boundaries	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.3160579166666667	0.4076966666666667	0.09163874999999999	1.2899429033971885	0.00038970317608088504	***
+boundary_pass_event	Boundary pass events	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.0020309348800773373	0.0020309348800773373	0.0	1.0	1.0	ns
+mean_loop_length	Mean loop length	two-sided exact two-sample permutation test on raw per-chain values	10	10	240.23256173692707	272.77185218801617	32.5392904510891	1.135449125696466	1.082508822446903e-05	***
+boundary_crossing_stripe	Boundary-crossing stripe	two-sided exact two-sample permutation test on raw per-chain values	10	10	0.06078416666666666	0.09541	0.034625833333333335	1.5696521846423823	0.004957890406806815	**
