@@ -101,6 +101,26 @@ def multiplier_label(multiplier: float) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "p", label)
 
 
+def boundary_strength_summary(records: list[dict]) -> dict:
+    values = np.array([float(record["scaled_boundary_strength"]) for record in records], dtype=float)
+    mean = float(values.mean()) if values.size else float("nan")
+    sd = float(values.std(ddof=1)) if values.size > 1 else 0.0
+    return {
+        "mean_boundary_strength": mean,
+        "sd_boundary_strength": sd,
+        "mean_boundary_strength_pct": mean * 100.0,
+        "sd_boundary_strength_pct": sd * 100.0,
+    }
+
+
+def heatmap_tick_label(label: str, strength_summary: dict) -> str:
+    mean = strength_summary["mean_boundary_strength_pct"]
+    sd = strength_summary["sd_boundary_strength_pct"]
+    if not np.isfinite(mean) or not np.isfinite(sd):
+        return f"{label}\nNA"
+    return f"{label}\n{mean:.1f} +- {sd:.1f}%"
+
+
 def require_boundary_strength(base_cfg: dict) -> dict:
     try:
         boundary_strength = base_cfg["lef"]["topology_kwargs"]["boundary_strength"]
@@ -242,7 +262,12 @@ def _norm_for_row(values: np.ndarray) -> TwoSlopeNorm:
     return TwoSlopeNorm(vmin=1.0 - spread, vcenter=1.0, vmax=1.0 + spread)
 
 
-def plot_heatmaps(summary: pd.DataFrame, labels: list[str], out_path: Path) -> None:
+def plot_heatmaps(
+    summary: pd.DataFrame,
+    labels: list[str],
+    display_labels: list[str],
+    out_path: Path,
+) -> None:
     nrows = len(METRIC_ORDER)
     fig, axes = plt.subplots(
         nrows,
@@ -270,8 +295,8 @@ def plot_heatmaps(summary: pd.DataFrame, labels: list[str], out_path: Path) -> N
         ax.set_yticklabels([METRIC_LABELS[metric].replace("\n", " ")], fontsize=9)
         ax.set_xticks(range(len(labels)))
         if row_idx == nrows - 1:
-            ax.set_xticklabels(labels, fontsize=9)
-            ax.set_xlabel("Boundary-strength multiplier, RNAP off", fontsize=10)
+            ax.set_xticklabels(display_labels, fontsize=9)
+            ax.set_xlabel("Boundary-strength multiplier, RNAP off (mean +- SD explicit boundary strength)", fontsize=10)
         else:
             ax.set_xticklabels([])
         ax.tick_params(axis="both", length=0)
@@ -327,6 +352,7 @@ def main() -> None:
     boundary_rows = []
     all_metric_rows = [baseline_rows]
     sweep_labels = []
+    sweep_display_labels = []
     generated_paths = {}
 
     for multiplier in args.multipliers:
@@ -340,10 +366,13 @@ def main() -> None:
 
         for record in strength_records:
             boundary_rows.append({"config": label, **record})
+        strength_summary = boundary_strength_summary(strength_records)
+        sweep_display_labels.append(heatmap_tick_label(label, strength_summary))
         generated_config_rows.append(
             {
                 "config": label,
                 "multiplier": multiplier,
+                **strength_summary,
                 "config_path": str(cfg_path),
                 "h5_path": str(h5_path),
                 "max_rnapii": 0,
@@ -374,7 +403,7 @@ def main() -> None:
     pd.DataFrame(boundary_rows).to_csv(out_dir / "boundary_strength_values.tsv", sep="\t", index=False)
 
     svg_path = out_dir / "boundary_strength_sweep_heatmaps.svg"
-    plot_heatmaps(summary, sweep_labels, svg_path)
+    plot_heatmaps(summary, sweep_labels, sweep_display_labels, svg_path)
 
     method = {
         "baseline_label": args.label1,
@@ -382,6 +411,7 @@ def main() -> None:
         "baseline_h5": str(args.h5_config1),
         "multipliers": args.multipliers,
         "boundary_strength_policy": "explicit boundary_strength entries multiplied and capped at 1.0; default_boundary_strength unchanged",
+        "x_axis_boundary_strength_label": "multiplier plus mean +- sample SD of explicit capped boundary strengths, shown as percent",
         "rnap_policy": "generated configs set lef.max_rnapii=0 and rnapii_load/rnapii_translocate=null",
         "normalization": "mean raw per-chain metric in generated config divided by mean raw per-chain metric in config1",
         "statistical_test": STAT_TEST_NAME,

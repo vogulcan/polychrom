@@ -1,1 +1,0 @@
-micromamba run -n polychrom python scripts/sweep_rnapoff_boundary_strength_1d.py
