@@ -59,6 +59,7 @@ from gen_lesion_grid_and_heatmaps import (
     MEASURED_BYTYPE_LABELS,
     MEASURED_LABELS,
     MEASURED_SECONDS_LABELS,
+    MEASURED_STAGEFRAC_LABELS,
     METRIC_LABELS,
     SEQ_CMAP,
     _CATEGORIES,
@@ -92,6 +93,7 @@ def _measured_keys() -> list[str]:
         keys += [f"{cat}_dwell_mean_s", f"{cat}_dwell_median_s",
                  f"{cat}_dwell_p90_s", f"{cat}_dwell_max_s",
                  f"{cat}_n_events", f"{cat}_legtick_fraction"]
+    keys += list(MEASURED_STAGEFRAC_LABELS)
     return keys
 
 
@@ -199,7 +201,15 @@ def run_sweep(
             raws[m][ri, ci] = gm
             folds[m][ri, ci] = gm / bm if np.isfinite(bm) and bm != 0 else float("nan")
         if not no_measure:
-            ms = measure_lesion_stall(Path(h5_path), tick_seconds, chunk=measure_chunk)
+            # Stage windows for the fraction metric: the swept axis is this row's
+            # tick value, its fixed companion is the constant.
+            if swept == "prerecog":
+                prt, rpt = task["t"], fixed_ticks
+            else:
+                prt, rpt = fixed_ticks, task["t"]
+            ms = measure_lesion_stall(
+                Path(h5_path), tick_seconds, chunk=measure_chunk,
+                prerecognition_ticks=prt, repair_ticks=rpt)
             for k in measured:
                 measured[k][ri, ci] = ms[k]
 
@@ -253,6 +263,9 @@ def run_sweep(
              "Measured cohesin stall DURATION (s, per event)", "stall duration (s)", "{:.0f}", SEQ_CMAP),
             (MEASURED_BYTYPE_LABELS, f"{prefix}_measured_stall_by_type.svg",
              "Measured cohesin stall by lesion type/state (mean s)", "stall duration (s)", "{:.0f}", SEQ_CMAP),
+            (MEASURED_STAGEFRAC_LABELS, f"{prefix}_measured_stall_fraction.svg",
+             "Measured cohesin stall / lesion stage lifetime (per-encounter mean)",
+             "stall / stage lifetime", "{:.2f}", SEQ_CMAP),
         ]
         for labels, fname, ttl, vlab, cfmt, cmap in specs:
             plot_heatmaps(

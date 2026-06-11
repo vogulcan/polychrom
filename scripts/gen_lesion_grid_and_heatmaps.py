@@ -315,6 +315,15 @@ MEASURED_BYTYPE_LABELS = {
     "b_repair_dwell_mean_s": "Type B repair stall\n(mean, s)",
 }
 
+# Per-(type, state) stall as a FRACTION of the lesion's lifetime in that stage:
+# per-encounter mean stall / stage-window seconds (PRE -> pre-recognition window,
+# REPAIR -> repair window). 1.0 = a held leg occupies the whole stage on average.
+MEASURED_STAGEFRAC_LABELS = {
+    "a_pre_stall_frac_of_stage": "Type A pre-recognition\nstall / stage lifetime",
+    "a_repair_stall_frac_of_stage": "Type A repair\nstall / stage lifetime",
+    "b_repair_stall_frac_of_stage": "Type B repair\nstall / stage lifetime",
+}
+
 
 def _pct(values: np.ndarray, q: float) -> float:
     return float(np.percentile(values, q)) if values.size else float("nan")
@@ -334,8 +343,25 @@ def _dwell_summary(run_ticks: list[int], tick_seconds: float, prefix: str,
     }
 
 
+def _stage_frac(out: dict[str, float], tick_seconds: float,
+                prerecognition_ticks: float | None, repair_ticks: float | None) -> None:
+    """Add ``<cat>_stall_frac_of_stage`` to ``out``: the per-encounter mean stall
+    divided by the lesion's mean lifetime in that stage (PRE -> pre-recognition
+    window, REPAIR -> repair window). NaN when the window is unknown (the caller
+    did not pass it) or the category had no measured stall."""
+    stage_ticks = {"a_pre": prerecognition_ticks,
+                   "a_repair": repair_ticks, "b_repair": repair_ticks}
+    for cat in _CATEGORIES:
+        win_t = stage_ticks.get(cat)
+        win_s = float(win_t) * float(tick_seconds) if win_t else 0.0
+        dwell = out.get(f"{cat}_dwell_mean_s", float("nan"))
+        out[f"{cat}_stall_frac_of_stage"] = (
+            dwell / win_s if win_s > 0 and np.isfinite(dwell) else float("nan"))
+
+
 def measure_lesion_stall(
-    h5_path: Path, tick_seconds: float, chunk: int = 2000
+    h5_path: Path, tick_seconds: float, chunk: int = 2000,
+    *, prerecognition_ticks: float | None = None, repair_ticks: float | None = None,
 ) -> dict[str, float]:
     """Measure lesion-induced cohesin stalling DIRECTLY from a 1D trajectory.
 
@@ -379,6 +405,7 @@ def measure_lesion_stall(
             base = {k: float("nan") for k in keys}
             for cat in _CATEGORIES:
                 base.update(_dwell_summary([], tick_seconds, cat, 0, 1, 1))
+            _stage_frac(base, tick_seconds, prerecognition_ticks, repair_ticks)
             return base
         frames = int(h["positions"].shape[0])
         n_lefs = int(h["positions"].shape[1])
@@ -476,6 +503,7 @@ def measure_lesion_stall(
         for cat, code in _CATEGORIES.items():
             out.update(_dwell_summary(cat_runs[code], tick_seconds, cat,
                                       cat_legframes[code], frames, n_lefs))
+        _stage_frac(out, tick_seconds, prerecognition_ticks, repair_ticks)
         return out
 
 
@@ -836,6 +864,8 @@ def main() -> None:
         measured_keys += [f"{cat}_dwell_mean_s", f"{cat}_dwell_median_s",
                           f"{cat}_dwell_p90_s", f"{cat}_dwell_max_s",
                           f"{cat}_n_events", f"{cat}_legtick_fraction"]
+    # Per-(type, state) stall fraction of the lesion's stage lifetime.
+    measured_keys += list(MEASURED_STAGEFRAC_LABELS)
     measured = {k: np.full(shape, np.nan) for k in measured_keys}
 
     tasks = [
@@ -864,7 +894,9 @@ def main() -> None:
             # heatmap masks that cell instead of drawing inf.
             folds[m][ri, ci] = gm / bm if np.isfinite(bm) and bm != 0 else float("nan")
         if not args.no_measure:
-            ms = measure_lesion_stall(Path(h5_path), tick_seconds, chunk=args.measure_chunk)
+            ms = measure_lesion_stall(
+                Path(h5_path), tick_seconds, chunk=args.measure_chunk,
+                prerecognition_ticks=prerec_ticks, repair_ticks=repair_t)
             for k in measured:
                 measured[k][ri, ci] = ms[k]
 
@@ -965,6 +997,21 @@ def main() -> None:
             center=None,
             cmap=SEQ_CMAP,
         )
+        # (d) per-(type, state) stall as a FRACTION of the lesion's stage lifetime.
+        frac_svg = plots_dir / "lesion_grid_measured_stall_fraction.svg"
+        plot_heatmaps(
+            measured, MEASURED_STAGEFRAC_LABELS,
+            y_values=p_sorted, y_label=y_label, density_axis=density_axis, x_label=x_label,
+            out_path=frac_svg,
+            title=(
+                "Measured cohesin stall as a fraction of the lesion's stage lifetime\n"
+                f"per-encounter mean stall / stage window; RNAPII off, tick={tick_seconds:g}s"
+            ),
+            value_label="stall / stage lifetime",
+            cell_fmt="{:.2f}",
+            center=None,
+            cmap=SEQ_CMAP,
+        )
         # measured TSV: occupancy + dwell distribution + per-type + analytic ref.
         m_tsv = plots_dir / "lesion_grid_measured_stall.tsv"
         m_rows = []
@@ -981,6 +1028,7 @@ def main() -> None:
         print(f"wrote {occ_svg}")
         print(f"wrote {sec_svg}")
         print(f"wrote {bytype_svg}")
+        print(f"wrote {frac_svg}")
         print(f"wrote {m_tsv}")
 
 

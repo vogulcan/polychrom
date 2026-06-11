@@ -1,0 +1,954 @@
+lef:
+  chain_length: 5000
+  num_chains: 10
+  separation: 240
+  lifetime: 188
+  lifetime_stalled: 188
+  lifetime_ctcf: 752
+  tick_seconds: 8
+  warmup_steps: 12000
+  trajectory_length: 20000
+  chunk_size: 50
+  seed: 42
+  max_rnapii: 1066
+  topology_kwargs:
+    tads:
+    - left: 0
+      right: 709
+      left_strength: 0.13
+      right_strength: 0.1
+    - left: 710
+      right: 1631
+      left_strength: 0.1
+      right_strength: 0.12
+    - left: 1632
+      right: 2437
+      left_strength: 0.12
+      right_strength: 0.12
+    - left: 2438
+      right: 3048
+      left_strength: 0.12
+      right_strength: 0.13
+    - left: 3049
+      right: 3532
+      left_strength: 0.13
+      right_strength: 0.12
+    - left: 3533
+      right: 4516
+      left_strength: 0.12
+      right_strength: 0.09
+    - left: 4517
+      right: 4999
+      left_strength: 0.09
+      right_strength: 0.13
+    default_boundary_strength: 0.13
+    release_prob: 0.0
+    include_chromosome_ends: true
+    lifetime_rnapii_stalled: 188
+    rnapii_stall_prob: 0.0
+    rnapii_stride: 1
+    rnapii_push_prob: 0.7
+    rnapii_headon_push_prob: 0.1
+    rnapii_pause_cohesin_restraint: 0.3
+    rnapii_pause_restraint_window: 1
+    rnapii_poised_block_prob: 0.923
+    rnapii_paused_block_prob: 0.923
+    rnapii_elongating_block_prob: 0.923
+    rnapii_terminating_block_prob: 0.923
+    ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
+    targeted_load_prob: 0.02
+    loading_window: 1
+    target_enhancers: true
+    target_tss: false
+    weight_loading_by_activity: true
+    lesion_spacing: 0
+    genes:
+    - tss: 705
+      tes: 670
+      load_prob: 0.00766
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6274
+      pause_release_prob: 0.0286
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 301
+      tes: 366
+      load_prob: 0.00261
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2701
+      pause_release_prob: 0.0158
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 575
+      tes: 519
+      load_prob: 0.01094
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 192
+      - 510
+      - 554
+      enhancer_logic: additive
+      initiation_prob: 0.2709
+      pause_release_prob: 0.0182
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 421
+      tes: 373
+      load_prob: 0.01273
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2847
+      pause_release_prob: 0.016
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 238
+      tes: 264
+      load_prob: 0.00126
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 125
+      - 274
+      enhancer_logic: additive
+      initiation_prob: 0.2347
+      pause_release_prob: 0.0188
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 457
+      tes: 477
+      load_prob: 0.00212
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3562
+      pause_release_prob: 0.0171
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 18
+      tes: 30
+      load_prob: 0.00665
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 111
+      - 119
+      - 121
+      - 200
+      enhancer_logic: additive
+      initiation_prob: 0.1075
+      pause_release_prob: 0.0116
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 488
+      tes: 498
+      load_prob: 0.00466
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3779
+      pause_release_prob: 0.0219
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 184
+      tes: 192
+      load_prob: 0.00592
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5356
+      pause_release_prob: 0.021
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 509
+      tes: 504
+      load_prob: 0.00303
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 403
+      - 408
+      - 632
+      enhancer_logic: additive
+      initiation_prob: 0.2404
+      pause_release_prob: 0.0137
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 714
+      tes: 742
+      load_prob: 0.01213
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5851
+      pause_release_prob: 0.0237
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1626
+      tes: 1493
+      load_prob: 0.01118
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.266
+      pause_release_prob: 0.023
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1403
+      tes: 1465
+      load_prob: 0.00633
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 1307
+      - 1469
+      enhancer_logic: additive
+      initiation_prob: 0.3011
+      pause_release_prob: 0.0144
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1199
+      tes: 1168
+      load_prob: 0.01478
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6421
+      pause_release_prob: 0.0303
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 930
+      tes: 913
+      load_prob: 0.00872
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5453
+      pause_release_prob: 0.0289
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1016
+      tes: 1029
+      load_prob: 0.00302
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2554
+      pause_release_prob: 0.0216
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1314
+      tes: 1321
+      load_prob: 0.00806
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 830
+      - 942
+      enhancer_logic: additive
+      initiation_prob: 0.1272
+      pause_release_prob: 0.0099
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 974
+      tes: 968
+      load_prob: 0.00279
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 866
+      - 879
+      - 1060
+      enhancer_logic: additive
+      initiation_prob: 0.1304
+      pause_release_prob: 0.0119
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1097
+      tes: 1093
+      load_prob: 0.01212
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6347
+      pause_release_prob: 0.0285
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1636
+      tes: 1648
+      load_prob: 0.00577
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5839
+      pause_release_prob: 0.0276
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2434
+      tes: 2415
+      load_prob: 0.00518
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2456
+      pause_release_prob: 0.0201
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2066
+      tes: 1770
+      load_prob: 0.00348
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6573
+      pause_release_prob: 0.0211
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2366
+      tes: 2148
+      load_prob: 0.01596
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 2000
+      - 2407
+      enhancer_logic: additive
+      initiation_prob: 0.0547
+      pause_release_prob: 0.0144
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1665
+      tes: 1762
+      load_prob: 0.0053
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2753
+      pause_release_prob: 0.0177
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2379
+      tes: 2409
+      load_prob: 0.00426
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2961
+      pause_release_prob: 0.0208
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2107
+      tes: 2125
+      load_prob: 0.00453
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2935
+      pause_release_prob: 0.0184
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2092
+      tes: 2080
+      load_prob: 0.00919
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5789
+      pause_release_prob: 0.026
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 1660
+      tes: 1654
+      load_prob: 0.00804
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 1779
+      - 1821
+      enhancer_logic: additive
+      initiation_prob: 0.1958
+      pause_release_prob: 0.0191
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2074
+      tes: 2071
+      load_prob: 0.00835
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 1604
+      - 2118
+      enhancer_logic: additive
+      initiation_prob: 0.2038
+      pause_release_prob: 0.0178
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2441
+      tes: 2460
+      load_prob: 0.00847
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2664
+      pause_release_prob: 0.0165
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3046
+      tes: 3034
+      load_prob: 0.03
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3064
+      pause_release_prob: 0.0219
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2484
+      tes: 2762
+      load_prob: 0.00433
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5428
+      pause_release_prob: 0.0249
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2940
+      tes: 2828
+      load_prob: 0.00398
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2998
+      pause_release_prob: 0.019
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2981
+      tes: 3017
+      load_prob: 0.00313
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 2655
+      - 2807
+      - 2912
+      - 2946
+      enhancer_logic: additive
+      initiation_prob: 0.0446
+      pause_release_prob: 0.0113
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2784
+      tes: 2818
+      load_prob: 0.00982
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5563
+      pause_release_prob: 0.0311
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 2465
+      tes: 2468
+      load_prob: 0.0148
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2632
+      pause_release_prob: 0.0172
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3054
+      tes: 3093
+      load_prob: 0.00548
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.54
+      pause_release_prob: 0.0256
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3525
+      tes: 3522
+      load_prob: 0.00306
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5292
+      pause_release_prob: 0.0297
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3441
+      tes: 3177
+      load_prob: 0.0031
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3473
+      enhancer_logic: additive
+      initiation_prob: 0.2958
+      pause_release_prob: 0.0167
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3448
+      tes: 3498
+      load_prob: 0.0101
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5435
+      pause_release_prob: 0.0269
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3169
+      tes: 3125
+      load_prob: 0.01087
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3134
+      - 3297
+      - 3393
+      enhancer_logic: additive
+      initiation_prob: 0.3046
+      pause_release_prob: 0.0169
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3101
+      tes: 3120
+      load_prob: 0.00927
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3093
+      - 3169
+      enhancer_logic: additive
+      initiation_prob: 0.2744
+      pause_release_prob: 0.0179
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3540
+      tes: 3568
+      load_prob: 0.00352
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2613
+      pause_release_prob: 0.0203
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4513
+      tes: 4508
+      load_prob: 0.00722
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2971
+      pause_release_prob: 0.023
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3577
+      tes: 3680
+      load_prob: 0.00659
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5607
+      pause_release_prob: 0.0206
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4335
+      tes: 4422
+      load_prob: 0.00715
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5422
+      pause_release_prob: 0.0245
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4168
+      tes: 4240
+      load_prob: 0.01205
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.4751
+      pause_release_prob: 0.0212
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3916
+      tes: 3977
+      load_prob: 0.00718
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3936
+      - 3940
+      - 3955
+      enhancer_logic: additive
+      initiation_prob: 0.2468
+      pause_release_prob: 0.0159
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3842
+      tes: 3901
+      load_prob: 0.01033
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3724
+      pause_release_prob: 0.0162
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3749
+      tes: 3790
+      load_prob: 0.00633
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3418
+      pause_release_prob: 0.017
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4104
+      tes: 4140
+      load_prob: 0.00756
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 4124
+      - 4305
+      enhancer_logic: additive
+      initiation_prob: 0.1255
+      pause_release_prob: 0.0081
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4037
+      tes: 4001
+      load_prob: 0.00994
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6131
+      pause_release_prob: 0.0218
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4299
+      tes: 4265
+      load_prob: 0.00187
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.2778
+      pause_release_prob: 0.023
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4095
+      tes: 4062
+      load_prob: 0.00465
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.38
+      pause_release_prob: 0.0186
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3725
+      tes: 3692
+      load_prob: 0.00412
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3600
+      - 3605
+      - 3620
+      - 3624
+      - 3632
+      enhancer_logic: additive
+      initiation_prob: 0.1062
+      pause_release_prob: 0.0138
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4460
+      tes: 4491
+      load_prob: 0.0036
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3721
+      - 4191
+      - 4324
+      enhancer_logic: additive
+      initiation_prob: 0.2575
+      pause_release_prob: 0.0139
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4327
+      tes: 4305
+      load_prob: 0.00481
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3552
+      - 4192
+      - 4399
+      - 4429
+      enhancer_logic: additive
+      initiation_prob: 0.0775
+      pause_release_prob: 0.0105
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3802
+      tes: 3820
+      load_prob: 0.01984
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5162
+      pause_release_prob: 0.026
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4429
+      tes: 4437
+      load_prob: 0.003
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3677
+      - 4001
+      enhancer_logic: additive
+      initiation_prob: 0.0459
+      pause_release_prob: 0.0107
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4156
+      tes: 4163
+      load_prob: 0.01302
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3813
+      pause_release_prob: 0.018
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 3990
+      tes: 3984
+      load_prob: 0.00156
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3261
+      pause_release_prob: 0.0195
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4047
+      tes: 4051
+      load_prob: 0.00459
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3371
+      pause_release_prob: 0.0224
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4502
+      tes: 4499
+      load_prob: 0.00683
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 3923
+      - 4365
+      - 4426
+      enhancer_logic: additive
+      initiation_prob: 0.11
+      pause_release_prob: 0.0157
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4250
+      tes: 4253
+      load_prob: 0.00959
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.5477
+      pause_release_prob: 0.0222
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4452
+      tes: 4455
+      load_prob: 0.0106
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3357
+      pause_release_prob: 0.0168
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4525
+      tes: 4540
+      load_prob: 0.01132
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.6256
+      pause_release_prob: 0.0305
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4652
+      tes: 4700
+      load_prob: 0.00454
+      requires_enhancer: false
+      load_requires_enhancer: false
+      initiation_prob: 0.3789
+      pause_release_prob: 0.0189
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4827
+      tes: 4803
+      load_prob: 0.00414
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 4853
+      - 4932
+      - 4936
+      enhancer_logic: additive
+      initiation_prob: 0.1876
+      pause_release_prob: 0.0152
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+    - tss: 4760
+      tes: 4746
+      load_prob: 0.01192
+      requires_enhancer: true
+      load_requires_enhancer: true
+      enhancers:
+      - 4728
+      - 4874
+      - 4979
+      enhancer_logic: additive
+      initiation_prob: 0.2976
+      pause_release_prob: 0.0187
+      elongation_step_prob: 0.4
+      pause_offset: 0
+      termination_prob: 0.08
+  plugins:
+    topology: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load: polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+viewer:
+  enabled: false
+  max_frames: 1000
+  bridge_cost: 1.0
+  insulation_score_window: 500
+  site_start: 0
+  site_end: 5000
+polymer:
+  platform: cuda
+  gpu: '0'
+  integrator: variableLangevin
+  error_tol: 0.02
+  collision_rate: 0.1
+  precision: single
+  seed: 2042
+  density: 0.2
+  pbc: false
+  md_steps_per_block: 2000
+  save_every_blocks: 1
+  restart_every_blocks: 5000
+  initial_relaxation_steps: 250000
+  pre_recording_steps: 83333
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 1000
+  overwrite: true
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: 1.0
+        repulsion_energy: 1.5
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 1.1
+        restrict_nonbonded_to_chains: true
+        replicate_ep_pairs_across_chains: true
+        ep_pairs: []
+        selective_attraction_energy: 0.0
+        polii_self_affinity: 0.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.15
+        confinement_per_chain: true
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+contacts:
+  replicate_map_starts_across_chains: true
+  map_starts:
+  - 0
+  map_size: 5000
+  cutoff:
+  - 2
+  analysis_resolutions:
+  - 1
+  - 10
+  num_processes: 12
+  verbose: true
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 2000
+        tol: 1.0e-06
+        ignore_diagonals: 2
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize:
+        - 12
+        - 12
+        dpi: 150

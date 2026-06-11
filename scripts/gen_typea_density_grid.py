@@ -63,6 +63,7 @@ from gen_lesion_grid_and_heatmaps import (
     MEASURED_BYTYPE_LABELS,
     MEASURED_LABELS,
     MEASURED_SECONDS_LABELS,
+    MEASURED_STAGEFRAC_LABELS,
     METRIC_LABELS,
     SEQ_CMAP,
     _CATEGORIES,
@@ -96,6 +97,7 @@ def _measured_keys() -> list[str]:
         keys += [f"{cat}_dwell_mean_s", f"{cat}_dwell_median_s",
                  f"{cat}_dwell_p90_s", f"{cat}_dwell_max_s",
                  f"{cat}_n_events", f"{cat}_legtick_fraction"]
+    keys += list(MEASURED_STAGEFRAC_LABELS)
     return keys
 
 
@@ -272,7 +274,9 @@ def main() -> None:
             raws[m][ri, ci] = gm
             folds[m][ri, ci] = gm / bm if np.isfinite(bm) and bm != 0 else float("nan")
         if not args.no_measure:
-            ms = measure_lesion_stall(Path(h5_path), tick_seconds, chunk=args.measure_chunk)
+            ms = measure_lesion_stall(
+                Path(h5_path), tick_seconds, chunk=args.measure_chunk,
+                prerecognition_ticks=prerec_ticks, repair_ticks=repair_t)
             for k in measured:
                 measured[k][ri, ci] = ms[k]
 
@@ -355,6 +359,14 @@ def main() -> None:
             title=f"Measured cohesin stall by lesion type/state (mean s, from trajectory)\n{sub}",
             value_label="stall duration (s)", cell_fmt="{:.0f}", center=None, cmap=SEQ_CMAP,
         )
+        frac_svg = out_dir / "ta_density_measured_stall_fraction.svg"
+        plot_heatmaps(
+            measured, MEASURED_STAGEFRAC_LABELS,
+            y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            out_path=frac_svg,
+            title=f"Measured cohesin stall / lesion stage lifetime (per-encounter mean, from trajectory)\n{sub}",
+            value_label="stall / stage lifetime", cell_fmt="{:.2f}", center=None, cmap=SEQ_CMAP,
+        )
         m_tsv = out_dir / "ta_density_measured_stall.tsv"
         mrows = []
         for ri, ta in enumerate(ta_sorted):
@@ -371,6 +383,7 @@ def main() -> None:
         print(f"wrote {occ_svg}")
         print(f"wrote {sec_svg}")
         print(f"wrote {bytype_svg}")
+        print(f"wrote {frac_svg}")
         print(f"wrote {m_tsv}")
 
 
