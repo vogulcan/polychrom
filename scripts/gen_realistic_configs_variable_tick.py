@@ -37,14 +37,22 @@ COHESIN:
     cohesin@genes is barrier-driven (RNAPII pinning, Busslinger 2017), not loading.
 
 RNAPII (per gene): Banigan et al. PNAS 2023 moving-barrier rates are converted
-  to the requested tick using p = 1-exp(-k*t). RNAPII velocity is held at
-  0.1 kb/s by using integer ``rnapii_stride`` plus a per-substep probability.
+  to the requested tick using p = 1-exp(-k*t). Realistic kinetics: elongation
+  0.05 kb/s = 3 kb/min (real Pol II ~2-4 kb/min) via integer ``rnapii_stride`` x a
+  per-substep probability; pause release minutes (per class, ~5-8 min); 3'
+  termination/unbind ~0.01/s -> ~100 s 3' dwell (longer dwells let terminating Pol
+  dominate the state budget). Promoter loading ~0.001/s (Banigan k_load).
 
-INTERFERENCE: RNAP is modeled as a permeable moving barrier. Banigan's
-  tbypass~100 s gives block_prob=exp(-tick_seconds/100) per tick. Head-on RNAP
-  pushes cohesin when possible; co-directional encounters block/follow until
-  RNAP vacates or cohesin bypasses. No fast RNAP-induced cohesin eviction is
-  used; lifetime_rnapii_stalled equals lifetime.
+INTERFERENCE (parameter_plan.md Group C; Banigan PNAS 2023): RNAP is a permeable
+  moving barrier. Per-tick cohesin bypass of an ACTIVE Pol II barrier uses
+  tbypass~100 s -> block_prob=exp(-tick/100); POISED pre-initiation Pol II is
+  leaky (bypassed ~8x faster). Per-ENCOUNTER (tick-independent): elongating RNAP
+  wins head-on and pushes the converging cohesin (headon_push 0.85), co-directional
+  contact mostly only slows it (push 0.20), with an intrinsic stall floor 0.15
+  (effective head-on push ~0.72). A cohesin near a paused Pol II has its
+  pause-release x0.3 (Tei 2026). NO fast RNAP-induced cohesin eviction:
+  lifetime_rnapii_stalled = lifetime -- a short eviction lifetime makes
+  transcription DEPLETE cohesin at genes (anti-Banigan; verified in 1D).
 """
 from __future__ import annotations
 import argparse
@@ -64,11 +72,24 @@ REFERENCE_MD_STEPS_PER_BLOCK = 5000
 RESTART_EVERY_BLOCKS = 5000
 COHESIN_LIFETIME_SECONDS = 25 * 60
 CTCF_LIFETIME_BOOST = 4
-RNAP_LOAD_RATE = 0.001
+RNAP_LOAD_RATE = 0.001          # Banigan k_load ~0.001/s
 RNAP_UNPAUSE_RATE = 0.002
-RNAP_UNBIND_RATE = 0.002
-RNAP_SPEED_KB_PER_SECOND = 0.1
-RNAP_BYPASS_SECONDS = 100.0
+RNAP_UNBIND_RATE = 0.01         # 3' termination/unbind ~0.01/s -> dwell ~100 s (realistic
+                                # 3' Pol II; longer dwells made terminating Pol dominate the
+                                # state budget in 1D). Terminating Pol still acts as a 3' barrier.
+RNAP_SPEED_KB_PER_SECOND = 0.05 # 0.05 kb/s = 3 kb/min (real Pol II ~2-4 kb/min). Keeps
+                                # extrusion >= 5x faster than transcription (Banigan 3-5x).
+RNAP_BYPASS_SECONDS = 100.0     # active Pol II barrier: cohesin bypass time (Banigan tbypass ~100 s)
+RNAP_POISED_BYPASS_SECONDS = 12.0  # POISED (pre-initiation) Pol II is a LEAKY barrier:
+                                # cohesin bypasses ~8x faster than active Pol II (~0.5 block @ 8 s)
+# RNAPII<->cohesin interference (per-ENCOUNTER probabilities; tick-INDEPENDENT, so emitted
+# as flat values). Banigan PNAS 2023 moving barrier (parameter_plan.md Group C): elongating
+# RNAP wins a head-on collision (high stall force) and pushes the converging cohesin;
+# a co-directional encounter mostly just slows cohesin.
+RNAP_HEADON_PUSH_PROB = 0.85    # P(elongating RNAP pushes a converging/head-on cohesin)
+RNAP_PUSH_PROB = 0.20           # P(push a co-directional/rear leg) -- cohesin mostly only slowed
+RNAP_STALL_PROB = 0.15          # intrinsic stall floor -> effective head-on push (1-.15)*.85~0.72
+RNAP_PAUSE_RESTRAINT = 0.3      # cohesin near paused Pol II x0.3 pause-release (Tei 2026)
 
 # Lesion (UV-damage) two-state machine (config4 only): biological stage durations
 # in seconds, converted to ticks per --tick-seconds. These are the means at an
@@ -179,6 +200,7 @@ def make_calibration(tick_seconds: float, trajectory_length=None, warmup_steps=N
         "rnap_load_prob": _rate_to_prob(RNAP_LOAD_RATE, tick_seconds),
         "rnap_termination_prob": _rate_to_prob(RNAP_UNBIND_RATE, tick_seconds),
         "rnap_block_prob": math.exp(-tick_seconds / RNAP_BYPASS_SECONDS),
+        "rnap_poised_block_prob": math.exp(-tick_seconds / RNAP_POISED_BYPASS_SECONDS),
         "class_ranges": {
             cls: {
                 "init": _scale_ref_range(spec["init"], tick_seconds),
@@ -474,18 +496,24 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     default_boundary_strength: 0.13
     release_prob: 0.0
     include_chromosome_ends: true
-    # Paper-calibrated: RNAP is a permeable moving barrier (Banigan), not a fast
-    # cohesin-eviction state. Keep RNAP-stalled cohesin at the base lifetime.
+    # Paper-calibrated: RNAP is a permeable moving barrier (Banigan), NOT a fast
+    # cohesin-eviction state. Keep RNAP-stalled cohesin at the base lifetime -- a
+    # SHORT eviction lifetime makes transcription DEPLETE (not accumulate) cohesin
+    # at genes, the opposite of the Banigan moving-barrier effect (verified in 1D).
     lifetime_rnapii_stalled: {life_rnapii_stalled}
-    rnapii_stall_prob: 0.0
     rnapii_stride: {calibration["rnapii_stride"]}
-    # Banigan moving barrier: head-on RNAP pushes cohesin where geometry allows;
-    # co-directional encounters are slowed/follow until RNAP vacates or bypasses.
-    rnapii_push_prob: 0.0
-    rnapii_headon_push_prob: 1.0
-    rnapii_pause_cohesin_restraint: 0.3
+    # Banigan moving barrier (per-encounter probs, tick-independent): elongating RNAP
+    # wins head-on and pushes the converging cohesin; co-directional contact mostly
+    # only slows cohesin. stall_prob is an intrinsic floor (effective head-on push ~0.72).
+    rnapii_stall_prob: {RNAP_STALL_PROB}
+    rnapii_push_prob: {RNAP_PUSH_PROB}
+    rnapii_headon_push_prob: {RNAP_HEADON_PUSH_PROB}
+    rnapii_pause_cohesin_restraint: {RNAP_PAUSE_RESTRAINT}
     rnapii_pause_restraint_window: 1
-    rnapii_poised_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
+    # Per-tick cohesin bypass of a Pol II barrier (tbypass ~100 s -> k ~0.01/s, Banigan).
+    # POISED pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
+    # paused / elongating / terminating Pol II are strong barriers.
+    rnapii_poised_block_prob: {_round_prob(calibration["rnap_poised_block_prob"], 3)}
     rnapii_paused_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
     rnapii_elongating_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
     rnapii_terminating_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
