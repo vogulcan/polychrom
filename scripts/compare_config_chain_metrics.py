@@ -775,7 +775,7 @@ def plot_metric_panels_svg(
     title: str,
     ncols: int = 3,
 ) -> Path:
-    colors = {label1: "#8a8f98", label2: "#2563eb"}
+    colors = {label1: "#465775f2", label2: "#a63446f2"}
     rng = np.random.default_rng(29)
     panels = [
         ("Core", "cohesin_gene_body", CORE_LABELS["cohesin_gene_body"], core_metrics, core_stats),
