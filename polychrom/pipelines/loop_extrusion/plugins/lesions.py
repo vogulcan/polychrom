@@ -176,6 +176,10 @@ def precompute_lesion_fields(
       (REPAIR->removed) rates are scaled by this, so lesions in shorter TADs are
       recognised and repaired faster.
     * ``lesion_target``   -- int, steady-state lesion count ``N // spacing``.
+    * ``lesion_genebody_p`` -- float[N] (or ``None``), ``lesion_site_p`` restricted to
+      gene-body sites and renormalised (the Type-A placement distribution).
+    * ``lesion_target_a`` -- int, the Type-A target used when Type-B is disabled,
+      ``round(lesion_target * gene_body_mass * lesion_type_a_prob)``.
     """
     N = int(args["N"])
     num_chains = int(args.get("num_chains", 1))
@@ -201,6 +205,24 @@ def precompute_lesion_fields(
 
     args["lesion_target"] = int(N // spacing) if spacing > 0 else 0
 
+    # Type-A sub-population, used when ``lesion_type_b_enabled`` is False: hold ONLY
+    # Type-A lesions at their B-enabled expected count, placed at gene-body sites
+    # with the same TAD-weighting A already has -- so disabling B leaves the Type-A
+    # numbers unchanged (no backfilling). ``gene_body_mass`` is the p-mass landing in
+    # gene bodies; ``target_a = round(target * gene_body_mass * type_a_prob)``.
+    p = args["lesion_site_p"]
+    type_a_prob = float(args.get("lesion_type_a_prob", 0.5))
+    if p is not None:
+        gene_body_mass = float(p[mask].sum())
+        p_a = p * mask
+        s = float(p_a.sum())
+        args["lesion_genebody_p"] = (p_a / s) if s > 0 else None
+    else:
+        nm = int(mask.sum())
+        gene_body_mass = (nm / N) if N else 0.0
+        args["lesion_genebody_p"] = (mask.astype(np.float64) / nm) if nm else None
+    args["lesion_target_a"] = int(round(args["lesion_target"] * gene_body_mass * type_a_prob))
+
 
 # ---------------------------------------------------------------------------
 # Per-tick dynamics
@@ -219,20 +241,33 @@ def _assign_type(site: int, args: Dict) -> int:
 def refill_lesions(args: Dict) -> None:
     """Spawn new lesions until the population reaches ``lesion_target``.
 
-    Sites are sampled with probability ``lesion_site_p`` (TAD-size weighted) and
-    placed in the PRE state with a type from :func:`_assign_type`. Already-lesioned
-    draws are rejected (occupancy ~ 1/spacing, so rejection is cheap). The whole
-    deficit is drawn per batch in one weighted ``np.random.choice`` call; the loop
-    only repeats if collisions left a residual deficit.
+    With Type-B enabled (default) sites are sampled with probability
+    ``lesion_site_p`` (TAD-size weighted), placed in the PRE state, and typed by
+    :func:`_assign_type` (A or B) -- the population is held at ``lesion_target``.
+
+    With ``lesion_type_b_enabled`` False, ONLY Type-A lesions are maintained, at
+    ``lesion_target_a`` (their B-enabled count), drawn from the gene-body-restricted
+    ``lesion_genebody_p``: Type-B simply does not form and the freed budget is NOT
+    backfilled with extra Type-A, so the Type-A numbers match the B-enabled run.
+
+    Already-lesioned draws are rejected (occupancy ~ 1/spacing, so rejection is
+    cheap). The whole deficit is drawn per batch in one weighted
+    ``np.random.choice`` call; the loop only repeats if collisions left a residual.
     """
-    target = int(args.get("lesion_target", 0))
+    if args.get("lesion_type_b_enabled", True):
+        target = int(args.get("lesion_target", 0))
+        p = args.get("lesion_site_p")
+        force_type = None
+    else:
+        target = int(args.get("lesion_target_a", 0))
+        p = args.get("lesion_genebody_p")
+        force_type = LESION_TYPE_A
     if target <= 0:
         return
     lesions: Dict[int, Lesion] = args.setdefault("lesions", {})
     if len(lesions) >= target:
         return
     N = int(args["N"])
-    p = args.get("lesion_site_p")
     for _ in range(8):
         need = target - len(lesions)
         if need <= 0:
@@ -245,7 +280,8 @@ def refill_lesions(args: Dict) -> None:
         for site in cand:
             site = int(site)
             if site not in lesions:
-                lesions[site] = Lesion(site, _assign_type(site, args), LESION_PRE)
+                ltype = force_type if force_type is not None else _assign_type(site, args)
+                lesions[site] = Lesion(site, ltype, LESION_PRE)
                 if len(lesions) >= target:
                     break
 

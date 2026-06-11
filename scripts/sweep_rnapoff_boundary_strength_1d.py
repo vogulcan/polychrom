@@ -8,12 +8,22 @@ fold changes versus the baseline replicate-chain mean.
 """
 from __future__ import annotations
 
+import os
+
+# Pin BLAS/OpenMP to one thread BEFORE numpy is imported so that running many 1D
+# sims under --jobs does not oversubscribe cores (each sweep point is numpy-light;
+# parallelism comes from running whole sims concurrently, not threaded BLAS).
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import copy
 import json
 import logging
+import multiprocessing as mp
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import matplotlib
@@ -45,13 +55,20 @@ from polychrom.pipelines.loop_extrusion.config import load_config  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.colors import TwoSlopeNorm  # noqa: E402
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm  # noqa: E402
+
+# Diverging fold-change colormap: slate-blue (below baseline) -> white (fold=1.0,
+# the TwoSlopeNorm center) -> brick-red (above baseline).
+FOLD_CMAP = LinearSegmentedColormap.from_list(
+    "fold_slate_red", ["#465775", "#ffffff", "#A63446"]
+)
 
 
 METRIC_ORDER = [
     "cohesin_gene_body",
     "cohesin_ctcf_boundary",
     "mean_loop_length",
+    "corner_dot",
     "boundary_pass_event",
     "cross_tad_occupancy",
     "crossed_boundaries",
@@ -64,6 +81,7 @@ METRIC_LABELS = {
     "cohesin_gene_body": CORE_LABELS["cohesin_gene_body"],
     "cohesin_ctcf_boundary": CORE_LABELS["cohesin_ctcf_boundary"],
     "mean_loop_length": CORE_LABELS["mean_loop_length"],
+    "corner_dot": CORE_LABELS["corner_dot"],
     **BOUNDARY_LABELS,
 }
 
@@ -121,6 +139,10 @@ def heatmap_tick_label(label: str, strength_summary: dict) -> str:
     return f"{label}\n{mean:.1f} +- {sd:.1f}%"
 
 
+def _uses_tads(base_cfg: dict) -> bool:
+    return bool(base_cfg.get("lef", {}).get("topology_kwargs", {}).get("tads"))
+
+
 def require_boundary_strength(base_cfg: dict) -> dict:
     try:
         boundary_strength = base_cfg["lef"]["topology_kwargs"]["boundary_strength"]
@@ -135,34 +157,76 @@ def require_boundary_strength(base_cfg: dict) -> dict:
     return boundary_strength
 
 
+def require_sweepable_strengths(base_cfg: dict) -> None:
+    """Accept either the per-TAD ``tads`` schema or a legacy ``boundary_strength``."""
+    if _uses_tads(base_cfg):
+        return
+    require_boundary_strength(base_cfg)
+
+
+def _scale_strength(original: float, multiplier: float) -> float:
+    return min(original * multiplier, 1.0)
+
+
+def _record(boundary, original: float, multiplier: float, scaled: float) -> dict:
+    return {
+        "boundary": boundary,
+        "original_boundary_strength": original,
+        "multiplier": multiplier,
+        "scaled_boundary_strength": scaled,
+        "capped": bool(scaled < original * multiplier),
+    }
+
+
 def make_sweep_config(base_cfg: dict, multiplier: float) -> tuple[dict, list[dict]]:
     cfg = copy.deepcopy(base_cfg)
     lef = cfg["lef"]
     kwargs = lef["topology_kwargs"]
-    source_strengths = require_boundary_strength(base_cfg)
 
     lef["max_rnapii"] = 0
     plugins = lef.setdefault("plugins", {})
     plugins["rnapii_load"] = None
     plugins["rnapii_translocate"] = None
 
-    new_strengths = {}
-    records = []
-    for key, value in source_strengths.items():
-        original = float(value)
-        scaled = min(original * multiplier, 1.0)
-        new_strengths[key] = round(scaled, 6)
-        records.append(
-            {
-                "boundary": key,
-                "original_boundary_strength": original,
-                "multiplier": multiplier,
-                "scaled_boundary_strength": scaled,
-                "capped": bool(scaled < original * multiplier),
-            }
-        )
-    kwargs["boundary_strength"] = new_strengths
+    records: list[dict] = []
+    if _uses_tads(base_cfg):
+        # Per-TAD schema: scale BOTH oriented anchors of every TAD independently.
+        default = float(kwargs.get("default_boundary_strength", 0.5))
+        new_tads = []
+        for i, tad in enumerate(kwargs["tads"]):
+            new_tad = dict(tad)
+            for side in ("left_strength", "right_strength"):
+                original = float(tad.get(side, default))
+                scaled = _scale_strength(original, multiplier)
+                new_tad[side] = round(scaled, 6)
+                records.append(_record(f"tad{i}:{side}", original, multiplier, scaled))
+            new_tads.append(new_tad)
+        kwargs["tads"] = new_tads
+    else:
+        source_strengths = require_boundary_strength(base_cfg)
+        new_strengths = {}
+        for key, value in source_strengths.items():
+            original = float(value)
+            scaled = _scale_strength(original, multiplier)
+            new_strengths[key] = round(scaled, 6)
+            records.append(_record(key, original, multiplier, scaled))
+        kwargs["boundary_strength"] = new_strengths
     return cfg, records
+
+
+def _run_sweep_point(task: dict) -> dict:
+    """Worker: run (or reuse) the 1D LEF stage for one sweep multiplier and return
+    its resolved H5 path. Top-level + picklable so it can be dispatched to a
+    process pool. Each process re-seeds numpy from the config seed inside
+    ``lef.run``, so results are deterministic and isolated from sibling workers."""
+    resolved = _resolve_h5(
+        cfg_path=Path(task["cfg_path"]),
+        requested_h5=Path(task["h5_path"]),
+        out_dir=Path(task["out_dir"]),
+        label=task["label"],
+        force_1d=task["force_1d"],
+    )
+    return {"label": task["label"], "h5": str(resolved)}
 
 
 def validate_baseline_h5(config1: Path, h5_config1: Path, label: str) -> None:
@@ -189,7 +253,7 @@ def rows_to_metric_frame(rows: list[dict], metrics: list[str]) -> pd.DataFrame:
 
 
 def selected_metric_rows(core_rows: list[dict], boundary_rows: list[dict]) -> pd.DataFrame:
-    core_keep = {"cohesin_gene_body", "cohesin_ctcf_boundary", "mean_loop_length"}
+    core_keep = {"cohesin_gene_body", "cohesin_ctcf_boundary", "mean_loop_length", "corner_dot"}
     rows = [row for row in core_rows if row["metric"] in core_keep]
     rows.extend(row for row in boundary_rows if row["metric"] in BOUNDARY_ORDER)
     return rows_to_metric_frame(rows, METRIC_ORDER)
@@ -214,6 +278,15 @@ def summarize_sweep(
             baseline_mean = float(np.nanmean(base_values)) if base_values.size else float("nan")
             comp_mean = float(np.nanmean(comp_values)) if comp_values.size else float("nan")
             fold = comp_mean / baseline_mean if baseline_mean else float("nan")
+            # SD of the per-chain fold (raw_value / baseline_mean). Since the
+            # baseline mean is a per-metric constant, this is sd(comp)/baseline_mean,
+            # i.e. consistent with the fold mean above.
+            comp_sd = (
+                float(np.nanstd(comp_values, ddof=1))
+                if int(np.isfinite(comp_values).sum()) > 1
+                else float("nan")
+            )
+            fold_sd = comp_sd / baseline_mean if baseline_mean else float("nan")
             p_value = _two_sample_permutation_pvalue(base_values, comp_values)
 
             summary_rows.append(
@@ -224,6 +297,7 @@ def summarize_sweep(
                     "baseline_mean_raw": baseline_mean,
                     "comparison_mean_raw": comp_mean,
                     "fold_vs_config1_mean": fold,
+                    "fold_vs_config1_sd": fold_sd,
                     "n_config1": int(np.isfinite(base_values).sum()),
                     "n_comparison": int(np.isfinite(comp_values).sum()),
                 }
@@ -272,7 +346,7 @@ def plot_heatmaps(
     fig, axes = plt.subplots(
         nrows,
         1,
-        figsize=(max(7.0, 1.25 * len(labels) + 3.2), 0.62 * nrows + 1.4),
+        figsize=(max(9.0, 1.25 * len(labels) + 4.8), 0.62 * nrows + 1.4),
         squeeze=False,
     )
 
@@ -284,18 +358,24 @@ def plot_heatmaps(
             .reindex(labels)
         )
         values = metric_summary["fold_vs_config1_mean"].to_numpy(dtype=float)[None, :]
-        cmap = plt.get_cmap("coolwarm").copy()
+        sds = metric_summary["fold_vs_config1_sd"].to_numpy(dtype=float)[None, :]
+        cmap = FOLD_CMAP.copy()
         cmap.set_bad("#f1f3f5")
         image = ax.imshow(values, aspect="auto", cmap=cmap, norm=_norm_for_row(values.ravel()))
-        for col_idx, value in enumerate(values.ravel()):
-            text = "NA" if not np.isfinite(value) else f"{value:.2f}"
-            ax.text(col_idx, 0, text, ha="center", va="center", fontsize=8, color="#111111")
+        for col_idx, (value, sd) in enumerate(zip(values.ravel(), sds.ravel())):
+            if not np.isfinite(value):
+                text = "NA"
+            elif np.isfinite(sd):
+                text = f"{value:.2f}\n+-{sd:.2f}"
+            else:
+                text = f"{value:.2f}"
+            ax.text(col_idx, 0, text, ha="center", va="center", fontsize=11, color="#111111")
 
         ax.set_yticks([0])
-        ax.set_yticklabels([METRIC_LABELS[metric].replace("\n", " ")], fontsize=9)
+        ax.set_yticklabels([METRIC_LABELS[metric].replace("\n", " ")], fontsize=12)
         ax.set_xticks(range(len(labels)))
         if row_idx == nrows - 1:
-            ax.set_xticklabels(display_labels, fontsize=9)
+            ax.set_xticklabels(display_labels, fontsize=12)
             ax.set_xlabel("Boundary-strength multiplier, RNAP off (mean +- SD explicit boundary strength)", fontsize=10)
         else:
             ax.set_xticklabels([])
@@ -303,12 +383,14 @@ def plot_heatmaps(
         for spine in ax.spines.values():
             spine.set_visible(False)
         cbar = fig.colorbar(image, ax=ax, fraction=0.018, pad=0.01)
-        cbar.ax.tick_params(labelsize=7, length=2)
+        cbar.ax.tick_params(labelsize=9, length=2)
 
     fig.suptitle("RNAP-off boundary-strength sweep: fold change vs config1", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, format="svg")
+    # bbox_inches="tight" expands the saved canvas to include the now-larger axis
+    # tick labels so none are clipped at the figure edge.
+    fig.savefig(out_path, format="svg", bbox_inches="tight")
     plt.close(fig)
 
 
@@ -323,6 +405,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--multipliers", type=parse_multipliers, default=parse_multipliers("1,2,3,4,5"))
     parser.add_argument("--force-1d", action="store_true", help="rerun generated sweep H5s")
     parser.add_argument("--label1", default="config1", help="baseline label")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="number of sweep-point 1D sims to run concurrently (process pool); "
+             "1 = sequential. Each sim is an independent process writing its own "
+             "H5, so results are identical to sequential.",
+    )
     return parser.parse_args()
 
 
@@ -336,7 +426,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     base_cfg = read_yaml(args.config1)
-    require_boundary_strength(base_cfg)
+    require_sweepable_strengths(base_cfg)
     base_topology = _topology(base_cfg)
     validate_baseline_h5(args.config1, args.h5_config1, args.label1)
 
@@ -355,6 +445,8 @@ def main() -> None:
     sweep_display_labels = []
     generated_paths = {}
 
+    # 1) generate every sweep config (cheap; always sequential) -----------
+    tasks = []
     for multiplier in args.multipliers:
         label = multiplier_label(multiplier)
         sweep_labels.append(label)
@@ -383,14 +475,45 @@ def main() -> None:
         )
 
         _validate_compatible(base_topology, _topology(cfg))
-        resolved_h5 = _resolve_h5(
-            cfg_path=cfg_path,
-            requested_h5=h5_path,
-            out_dir=out_dir,
-            label=label,
-            force_1d=args.force_1d,
+        tasks.append(
+            {
+                "label": label,
+                "cfg_path": str(cfg_path),
+                "h5_path": str(h5_path),
+                "out_dir": str(out_dir),
+                "force_1d": args.force_1d,
+            }
         )
-        core_rows, boundary_metric_rows, _, _ = analyze_run(label, cfg_path, resolved_h5, base_topology)
+
+    # 2) run each sweep point's 1D LEF stage (sequential or process pool) --
+    total = len(tasks)
+    jobs = max(1, int(args.jobs))
+    resolved_h5: dict[str, Path] = {}
+    if jobs == 1:
+        for n, task in enumerate(tasks, 1):
+            print(f"[{n}/{total}] {task['label']}")
+            res = _run_sweep_point(task)
+            resolved_h5[res["label"]] = Path(res["h5"])
+    else:
+        # Process pool: each sweep point is an independent process that re-seeds
+        # numpy from the config and writes its own H5 -> identical to sequential,
+        # just concurrent. A fork context avoids re-importing this module (and
+        # matplotlib) in every worker.
+        print(f"running {total} sweep points with --jobs {jobs} (process pool, fork context)")
+        ctx = mp.get_context("fork")
+        n = 0
+        with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
+            for res in ex.map(_run_sweep_point, tasks):
+                n += 1
+                print(f"[{n}/{total}] done {res['label']}")
+                resolved_h5[res["label"]] = Path(res["h5"])
+
+    # 3) analyze each resolved H5 (in main process, multiplier order) ------
+    for task in tasks:
+        label = task["label"]
+        core_rows, boundary_metric_rows, _, _ = analyze_run(
+            label, Path(task["cfg_path"]), resolved_h5[label], base_topology
+        )
         all_metric_rows.append(selected_metric_rows(core_rows, boundary_metric_rows))
 
     per_chain = pd.concat(all_metric_rows, ignore_index=True)

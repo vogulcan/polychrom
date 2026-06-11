@@ -67,10 +67,37 @@ def from_lists(
     return _window(ann, origin, span)
 
 
+def boundaries_from_topology_kwargs(tk: Any, chain_length: int) -> List[int]:
+    """Chain-relative interior TAD boundaries from either topology schema.
+
+    Supports the legacy ``tad_positions`` list and the per-TAD ``tads`` schema
+    (each record's ``left`` and ``right + 1``, reconstructing both edges of any
+    inter-TAD gap so the chain stays fully tiled). Returns sorted, unique
+    positions strictly inside ``(0, chain_length)`` -- the single source of truth
+    for every package consumer that draws TAD boundaries / intervals.
+    """
+    if not isinstance(tk, dict):
+        return []
+    tads = tk.get("tads")
+    if tads:
+        inner = set()
+        for rec in tads:
+            left = int(rec["left"])
+            right = int(rec["right"])
+            if left > 0:
+                inner.add(left)
+            if right + 1 < chain_length:
+                inner.add(right + 1)
+    else:
+        inner = {int(p) for p in (tk.get("tad_positions") or [])}
+    return sorted(p for p in inner if 0 < p < chain_length)
+
+
 def from_lef_cfg(lef_cfg, *, origin: int = 0, span: int | None = None) -> Dict[str, Any]:
     """Build an annotation dict from a ``LEFConfig`` topology.
 
-    Reads ``tad_positions`` (boundaries) and ``genes`` (tss/tes + ``enhancers``
+    Reads boundaries (legacy ``tad_positions`` or the per-TAD ``tads`` schema via
+    :func:`boundaries_from_topology_kwargs`) and ``genes`` (tss/tes + ``enhancers``
     or ``enhancer_pos``) from ``topology_kwargs``. ``span`` defaults to the chain
     length so a single-chain window is annotated.
     """
@@ -86,8 +113,10 @@ def from_lef_cfg(lef_cfg, *, origin: int = 0, span: int | None = None) -> Dict[s
             ep = g.get("enhancer_pos")
             e = [] if ep is None else [ep]
         enh.append([int(x) for x in e])
-    span = int(getattr(lef_cfg, "chain_length", 0) or 0) if span is None else span
-    return from_lists(tk.get("tad_positions", []), tss, tes, enh,
+    chain_length = int(getattr(lef_cfg, "chain_length", 0) or 0)
+    span = chain_length if span is None else span
+    boundaries = boundaries_from_topology_kwargs(tk, chain_length)
+    return from_lists(boundaries, tss, tes, enh,
                       origin=origin, span=span or None)
 
 

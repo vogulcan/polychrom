@@ -7,6 +7,7 @@ already populated with ``N``, ``LIFETIME``, ``LIFETIME_STALLED``,
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from ..config import LEFConfig
@@ -41,6 +42,138 @@ def _strength_at(
             return float(boundary_strength[str(position)])
         return float(default)
     return float(boundary_strength)
+
+
+@dataclass
+class TadRecord:
+    """One TAD's two oriented anchors (chain-relative).
+
+    ``left``/``right`` are the chain-relative anchor sites (``right`` is the
+    inclusive right-anchor site). ``left_side``/``right_side`` are the cohesin
+    leg directions each anchor captures: convergent TADs use ``-1`` (left-facing,
+    captures the leftward leg) and ``+1`` (right-facing, captures the rightward
+    leg). Strengths are the resolved capture probabilities BEFORE chromosome-end
+    forcing, which :func:`_apply_convergent_tads` applies.
+    """
+
+    left: int
+    right: int
+    left_strength: float
+    right_strength: float
+    left_side: int = -1
+    right_side: int = 1
+
+
+def _opt_strength(spec: Mapping[str, Any], key: str, default: float) -> float:
+    """Per-side strength from a ``tads`` record, falling back to ``default``."""
+    val = spec.get(key)
+    return float(default) if val is None else float(val)
+
+
+def _records_from_tads(
+    cfg: LEFConfig,
+    tads: Iterable[Mapping[str, Any]],
+    default_boundary_strength: float,
+) -> List[TadRecord]:
+    """Build canonical records from the explicit per-TAD ``tads`` schema.
+
+    Each entry is a mapping with required ``left``/``right`` (chain-relative,
+    ``right`` inclusive) and optional ``left_strength``/``right_strength``
+    (default ``default_boundary_strength``) and ``left_side``/``right_side``
+    (default convergent ``-1``/``+1``). Records are returned sorted by ``left``;
+    overlapping TADs are rejected. Gaps (``next.left > rec.right + 1``) are
+    allowed and simply leave anchor-free sites between TADs.
+    """
+    records: List[TadRecord] = []
+    for i, spec in enumerate(tads):
+        if not isinstance(spec, Mapping):
+            raise TypeError(f"tads[{i}] must be a mapping, got {type(spec).__name__}")
+        if "left" not in spec or "right" not in spec:
+            raise ValueError(f"tads[{i}] must contain 'left' and 'right'")
+        left = int(spec["left"])
+        right = int(spec["right"])
+        if not (0 <= left <= right < cfg.chain_length):
+            raise ValueError(
+                f"tads[{i}]: require 0 <= left <= right < chain_length "
+                f"({cfg.chain_length}); got left={left}, right={right}"
+            )
+        records.append(
+            TadRecord(
+                left=left,
+                right=right,
+                left_strength=_opt_strength(spec, "left_strength", default_boundary_strength),
+                right_strength=_opt_strength(spec, "right_strength", default_boundary_strength),
+                left_side=int(spec.get("left_side", -1)),
+                right_side=int(spec.get("right_side", 1)),
+            )
+        )
+    records.sort(key=lambda r: r.left)
+    for prev, nxt in zip(records[:-1], records[1:]):
+        if nxt.left <= prev.right:
+            raise ValueError(
+                f"Overlapping TADs: [{prev.left},{prev.right}] and "
+                f"[{nxt.left},{nxt.right}] share sites"
+            )
+    return records
+
+
+def _canonical_tads(
+    cfg: LEFConfig,
+    *,
+    tads: Optional[Iterable[Mapping[str, Any]]] = None,
+    tad_positions: Optional[Iterable[int]] = None,
+    boundary_strength: BoundaryStrength = 0.5,
+    default_boundary_strength: float = 0.5,
+) -> List[TadRecord]:
+    """Canonicalise a TAD layout into a list of :class:`TadRecord`.
+
+    Two mutually exclusive inputs are accepted:
+
+    - **New** ``tads``: an explicit list of per-TAD records (see
+      :func:`_records_from_tads`). Each TAD owns independent left/right anchors,
+      and inter-TAD gaps are allowed.
+    - **Legacy** ``tad_positions``: the chain is tiled by intervals
+      ``[0, *tad_positions, chain_length]`` and each interval ``[start, end)``
+      becomes a record with ``left=start``, ``right=end-1``. The left anchor's
+      strength is keyed by ``start`` and the right by ``end`` (historical
+      convention), resolved via :func:`_strength_at`.
+    """
+    if tads is not None and tad_positions:
+        raise ValueError("Provide either 'tads' or 'tad_positions', not both")
+    if tads is not None:
+        return _records_from_tads(cfg, tads, default_boundary_strength)
+
+    inner = [int(pos) for pos in (tad_positions or [])]
+    boundaries = [0, *inner, cfg.chain_length]
+    records = []
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+        records.append(
+            TadRecord(
+                left=start,
+                right=end - 1,
+                left_strength=_strength_at(boundary_strength, start, default_boundary_strength),
+                right_strength=_strength_at(boundary_strength, end, default_boundary_strength),
+            )
+        )
+    return records
+
+
+def _reconstruct_boundaries(cfg: LEFConfig, records: List[TadRecord]) -> List[int]:
+    """Chain-relative interval edges for downstream consumers (lesions, drawing).
+
+    Returns every internal segment edge: each TAD's ``left`` (when > 0) and the
+    site just past its ``right`` (when < chain_length). For an abutting (gap-free)
+    layout this reproduces the legacy ``tad_positions`` exactly; with gaps it
+    includes BOTH edges of every gap so the chain stays fully tiled by
+    alternating TAD and gap segments (keeping ``_tad_length_per_site`` correct).
+    """
+    edges = set()
+    for rec in records:
+        if rec.left > 0:
+            edges.add(rec.left)
+        if rec.right + 1 < cfg.chain_length:
+            edges.add(rec.right + 1)
+    return sorted(edges)
 
 
 def _base_args(cfg: LEFConfig) -> Dict[str, Any]:
@@ -86,37 +219,46 @@ def _apply_convergent_tads(
     args: Dict[str, Any],
     cfg: LEFConfig,
     *,
-    tad_positions: Iterable[int],
-    boundary_strength: BoundaryStrength,
+    tad_records: List[TadRecord],
     release_prob: float,
     include_chromosome_ends: bool,
-    default_boundary_strength: float = 0.5,
-) -> None:
-    """Place inward-facing CTCF barriers at each TAD interval edge.
+) -> List[tuple]:
+    """Place inward-facing CTCF barriers from canonical per-TAD records.
 
-    ``boundary_strength`` is resolved per anchor: pass a scalar for a uniform
-    barrier, or a ``{position: strength}`` mapping (keyed by the chain-relative
-    TAD boundary position) to tune each anchor individually. The left-facing
-    anchor of an interval is keyed by its ``start`` boundary, the right-facing
-    anchor (sitting at ``end - 1``) by its ``end`` boundary.
+    Each record contributes a left anchor (captures the ``left_side`` leg) and a
+    right anchor (captures the ``right_side`` leg), replicated across every chain.
+    The chromosome-start anchor (``left == 0``) and chromosome-end anchor
+    (``right == chain_length - 1``) are forced to hard ``1.0`` walls; when
+    ``include_chromosome_ends`` is False those two anchors are omitted entirely.
+    Sites belonging to no record (inter-TAD gaps) receive no anchor.
+
+    Returns the ground-truth anchor table as a list of tuples
+    ``(abs_position, chain_position, chain_index, side, strength, tad_index, edge)``
+    -- one row per anchor actually placed, per chain -- for H5 persistence. The
+    recorded strength is the value actually written (``1.0`` at forced ends).
     """
-    inner = [int(pos) for pos in tad_positions]
-    boundaries = [0, *inner, cfg.chain_length]
+    chain_end = cfg.chain_length - 1
+    anchors: List[tuple] = []
     for chain_idx in range(cfg.num_chains):
         chain_offset = chain_idx * cfg.chain_length
-        for start, end in zip(boundaries[:-1], boundaries[1:]):
-            left_site = chain_offset + start
-            right_site = chain_offset + end - 1
-            if include_chromosome_ends or start != 0:
-                args["ctcfCapture"][-1][left_site] = (
-                    1.0 if start == 0
-                    else _strength_at(boundary_strength, start, default_boundary_strength))
-                args["ctcfRelease"][-1][left_site] = float(release_prob)
-            if include_chromosome_ends or end != cfg.chain_length:
-                args["ctcfCapture"][1][right_site] = (
-                    1.0 if end == cfg.chain_length
-                    else _strength_at(boundary_strength, end, default_boundary_strength))
-                args["ctcfRelease"][1][right_site] = float(release_prob)
+        for tad_idx, rec in enumerate(tad_records):
+            left_site = chain_offset + rec.left
+            right_site = chain_offset + rec.right
+            if include_chromosome_ends or rec.left != 0:
+                strength = 1.0 if rec.left == 0 else rec.left_strength
+                args["ctcfCapture"][rec.left_side][left_site] = strength
+                args["ctcfRelease"][rec.left_side][left_site] = float(release_prob)
+                anchors.append(
+                    (left_site, rec.left, chain_idx, rec.left_side, strength, tad_idx, 0)
+                )
+            if include_chromosome_ends or rec.right != chain_end:
+                strength = 1.0 if rec.right == chain_end else rec.right_strength
+                args["ctcfCapture"][rec.right_side][right_site] = strength
+                args["ctcfRelease"][rec.right_side][right_site] = float(release_prob)
+                anchors.append(
+                    (right_site, rec.right, chain_idx, rec.right_side, strength, tad_idx, 1)
+                )
+    return anchors
 
 
 def _expand_genes_across_chains(
@@ -206,6 +348,7 @@ def convergent_tad_topology(
     cfg: LEFConfig,
     *,
     tad_positions: Iterable[int] = (),
+    tads: Optional[Iterable[Mapping[str, Any]]] = None,
     boundary_strength: BoundaryStrength = 0.5,
     release_prob: float = 0.0,
     include_chromosome_ends: bool = True,
@@ -218,20 +361,34 @@ def convergent_tad_topology(
     captured legs remain at CTCF until cohesin unloads, matching the NRMCB
     supplementary-box assumption.
 
-    ``boundary_strength`` accepts a scalar (uniform) or a ``{position: strength}``
-    mapping to set each TAD boundary individually; positions missing from the
-    mapping use ``default_boundary_strength``.
+    Two mutually exclusive layout inputs are accepted (see :func:`_canonical_tads`):
+
+    - ``tads``: explicit per-TAD records, each owning independent left/right
+      anchors (strength + orientation), with inter-TAD gaps allowed.
+    - ``tad_positions`` + ``boundary_strength``: the legacy shared-boundary form;
+      ``boundary_strength`` is a scalar or ``{position: strength}`` mapping with
+      ``default_boundary_strength`` as fallback.
+
+    ``args["tad_positions"]`` is set to the reconstructed chain-relative interval
+    edges (legacy positions for an abutting layout; both gap edges when gaps
+    exist) so downstream consumers -- lesion fields, drawing -- stay correct.
     """
     args = _base_args(cfg)
-    _apply_convergent_tads(
-        args,
+    records = _canonical_tads(
         cfg,
+        tads=tads,
         tad_positions=tad_positions,
         boundary_strength=boundary_strength,
-        release_prob=release_prob,
-        include_chromosome_ends=include_chromosome_ends,
         default_boundary_strength=default_boundary_strength,
     )
+    args["ctcf_anchors"] = _apply_convergent_tads(
+        args,
+        cfg,
+        tad_records=records,
+        release_prob=release_prob,
+        include_chromosome_ends=include_chromosome_ends,
+    )
+    args["tad_positions"] = _reconstruct_boundaries(cfg, records)
     return args
 
 
@@ -270,6 +427,7 @@ def gene_aware_topology(
     lesion_repair_ticks: int = 100,
     lesion_tad_size_exponent: float = 1.0,
     lesion_tad_repair_exponent: float = 1.0,
+    lesion_type_b_enabled: bool = True,
 ) -> Dict[str, Any]:
     """CTCF TAD layout + per-gene transcription units.
 
@@ -353,10 +511,11 @@ def gene_aware_topology(
     args["lesion_spacing"] = int(lesion_spacing)
     args["lesion_tad_size_exponent"] = float(lesion_tad_size_exponent)
     args["lesion_tad_repair_exponent"] = float(lesion_tad_repair_exponent)
+    args["lesion_type_b_enabled"] = bool(lesion_type_b_enabled)
     if lesion_spacing > 0:
         precompute_lesion_fields(
             args,
-            tad_positions=tad_positions,
+            tad_positions=args.get("tad_positions", tad_positions),
             gene_objs=gene_objs,
             tad_size_exponent=lesion_tad_size_exponent,
             tad_repair_exponent=lesion_tad_repair_exponent,
@@ -369,6 +528,7 @@ def gene_aware_convergent_tad_topology(
     cfg: LEFConfig,
     *,
     tad_positions: Iterable[int] = (),
+    tads: Optional[Iterable[Mapping[str, Any]]] = None,
     boundary_strength: BoundaryStrength = 0.5,
     release_prob: float = 0.0,
     include_chromosome_ends: bool = True,
@@ -401,11 +561,13 @@ def gene_aware_convergent_tad_topology(
     lesion_repair_ticks: int = 100,
     lesion_tad_size_exponent: float = 1.0,
     lesion_tad_repair_exponent: float = 1.0,
+    lesion_type_b_enabled: bool = True,
 ) -> Dict[str, Any]:
     """Directional TAD CTCFs plus per-gene RNAPII bookkeeping."""
     args = convergent_tad_topology(
         cfg,
         tad_positions=tad_positions,
+        tads=tads,
         boundary_strength=boundary_strength,
         release_prob=release_prob,
         include_chromosome_ends=include_chromosome_ends,
@@ -476,10 +638,11 @@ def gene_aware_convergent_tad_topology(
     args["lesion_spacing"] = int(lesion_spacing)
     args["lesion_tad_size_exponent"] = float(lesion_tad_size_exponent)
     args["lesion_tad_repair_exponent"] = float(lesion_tad_repair_exponent)
+    args["lesion_type_b_enabled"] = bool(lesion_type_b_enabled)
     if lesion_spacing > 0:
         precompute_lesion_fields(
             args,
-            tad_positions=tad_positions,
+            tad_positions=args.get("tad_positions", tad_positions),
             gene_objs=gene_objs,
             tad_size_exponent=lesion_tad_size_exponent,
             tad_repair_exponent=lesion_tad_repair_exponent,

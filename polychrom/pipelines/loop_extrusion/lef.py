@@ -313,6 +313,8 @@ def run(cfg: LEFConfig) -> Path:
             fh.attrs["lesion_repair_ticks"] = int(args.get("lesion_repair_ticks", 0))
             fh.attrs["lesion_tad_size_exponent"] = float(args.get("lesion_tad_size_exponent", 1.0))
             fh.attrs["lesion_tad_repair_exponent"] = float(args.get("lesion_tad_repair_exponent", 0.0))
+            fh.attrs["lesion_type_b_enabled"] = bool(args.get("lesion_type_b_enabled", True))
+            fh.attrs["lesion_target_a"] = int(args.get("lesion_target_a", 0))
             fh.attrs["lesion_block_prob"] = float(args.get("lesion_block_prob", 0.0))
         if rnapii_enabled:
             fh.attrs["max_rnapii"] = cfg.max_rnapii
@@ -327,5 +329,30 @@ def run(cfg: LEFConfig) -> Path:
                            ("load_prob", "f4")],
                 )
                 fh.create_dataset("genes", data=gene_arr)
+
+        # Ground-truth CTCF anchor table (per-TAD oriented boundaries). Written
+        # whenever the topology plugin exposes it (convergent topologies); absent
+        # for uniform/symmetric topologies, so downstream analysis falls back to
+        # config-derived anchors. Tiny -> no compression.
+        anchors = args.get("ctcf_anchors")
+        if anchors:
+            anchor_arr = np.array(
+                anchors,
+                dtype=[
+                    ("abs_position", "i4"),
+                    ("chain_position", "i4"),
+                    ("chain_index", "i4"),
+                    ("side", "i1"),
+                    ("strength", "f4"),
+                    ("tad_index", "i4"),
+                    ("edge", "i1"),
+                ],
+            )
+            fh.create_dataset("ctcf_anchors", data=anchor_arr)
+            fh.attrs["boundary_model"] = "per_tad_oriented"
+            fh.attrs["ctcf_anchor_schema_version"] = 1
+            fh.attrs["ctcf_anchors_per_chain"] = int(
+                len(anchor_arr) // max(cfg.num_chains, 1)
+            )
 
     return out_path

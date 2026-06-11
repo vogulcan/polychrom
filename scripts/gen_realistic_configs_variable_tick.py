@@ -382,7 +382,41 @@ def fmt_gene(g):
     return "{" + ", ".join(parts) + "}"
 
 
-def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separation=240, lesions=None):
+DEFAULT_BSTR = 0.13  # default_boundary_strength emitted below; ends forced to 1.0
+
+
+def make_tad_records(bounds, bstrength, chain, gap_frac=0.0):
+    """Per-TAD oriented-boundary records from shared boundaries + per-boundary
+    strengths.
+
+    TAD ``i`` takes its left_strength from the boundary on its left
+    (``bstrength[i-1]``) and its right_strength from the boundary on its right
+    (``bstrength[i]``); the two chromosome-end outer sides use the default (the
+    topology forces them to hard 1.0 walls regardless). This reproduces the
+    legacy ``tad_positions`` + ``boundary_strength`` ``ctcfCapture`` exactly.
+
+    With ``gap_frac > 0`` each interior TAD sheds ``gap_frac`` of its span on the
+    right, opening an anchor-free spacer before the next TAD. ``gap_frac == 0``
+    (default) keeps the anchors byte-identical to the legacy abutting layout.
+    """
+    edges = [0, *list(bounds), chain]
+    n = len(edges) - 1
+    records = []
+    for i in range(n):
+        left = edges[i]
+        right = edges[i + 1] - 1
+        ls = float(bstrength[i - 1]) if i > 0 else DEFAULT_BSTR
+        rs = float(bstrength[i]) if i < len(bounds) else DEFAULT_BSTR
+        if gap_frac > 0.0 and i < n - 1:
+            gw = int(round(gap_frac * (right - left)))
+            if 1 <= gw < right - left:
+                right -= gw
+        records.append((left, right, ls, rs))
+    return records
+
+
+def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separation=240,
+          lesions=None, gap_frac=0.0):
     # Pol II cap and relaxation/recording scale with locus size & chain count
     max_rnapii = (max(64, int(2560 * (CHAIN / 30000) * (num_chains / 4))) if txn_on else 0)
     lifetime = calibration["lifetime"]
@@ -392,9 +426,12 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     prerec = max(20000, int(500000 * CHAIN / 30000))
     rl = ("polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii" if txn_on else "null")
     rt = ("polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii" if txn_on else "null")
-    bstr_block = "\n".join(f"      {b}: {s:.2f}" for b, s in zip(bounds, bstrength))
+    records = make_tad_records(bounds, bstrength, CHAIN, gap_frac)
+    tads_block = "\n".join(
+        f"      - {{left: {l}, right: {r}, left_strength: {ls:.2f}, right_strength: {rs:.2f}}}"
+        for l, r, ls, rs in records
+    )
     gene_lines = "\n".join(f"      - {fmt_gene(g)}" for g in genes)
-    tad_pos = "[" + ", ".join(str(b) for b in bounds) + "]"
     # Lesion block: when ``lesions`` is given (config4) emit the full UV-damage
     # knob set + enable the lesion plugin; otherwise lesions are off. (We always
     # emit ``lesion_spacing`` -- never the retired ``lesion_prob`` -- so the
@@ -409,6 +446,7 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
             f"    lesion_block_prob: {ls['block_prob']}      # per-tick prob a stalling lesion blocks a cohesin leg",
             f"    lesion_tad_size_exponent: {ls['tad_size_exponent']}   # L_TAD**(-alpha): shorter TADs carry MORE lesions",
             f"    lesion_tad_repair_exponent: {ls['tad_repair_exponent']} # (L_mean/L_TAD)**beta: shorter TADs recognise/repair FASTER",
+            f"    lesion_type_b_enabled: {str(ls['type_b_enabled']).lower()}  # false -> only Type-A lesions kept (Type-A count unchanged, no backfill)",
         ])
         lesion_plugin_line = (
             "\n    lesion:      polychrom.pipelines.loop_extrusion.plugins.lesions:update_lesions"
@@ -431,9 +469,8 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
   max_rnapii: {max_rnapii}
 
   topology_kwargs:
-    tad_positions: {tad_pos}
-    boundary_strength:
-{bstr_block}
+    tads:
+{tads_block}
     default_boundary_strength: 0.13
     release_prob: 0.0
     include_chromosome_ends: true
@@ -576,6 +613,9 @@ def main():
                     help="discarded 1D warmup ticks; default preserves the 20 s generator's real duration")
     ap.add_argument("--bstr-mult", type=float, default=3.0,
                     help="config3 = config2 with all boundary strengths X times larger")
+    ap.add_argument("--gap-frac", type=float, default=0.0,
+                    help="fraction of each interior TAD's span left anchor-free as an "
+                         "inter-TAD gap (0 = abutting TADs, byte-identical to legacy)")
     # config4 (= config3 + UV lesions) knobs
     ap.add_argument("--lesion-spacing", type=int, default=10,
                     help="config4: steady-state lesion count = num_sites // spacing (0 disables)")
@@ -591,6 +631,9 @@ def main():
                     help="config4: placement weight L_TAD**(-alpha); larger -> shorter TADs carry more lesions")
     ap.add_argument("--lesion-tad-repair-exponent", type=float, default=1.0,
                     help="config4: rate * (L_mean/L_TAD)**beta; larger -> shorter TADs recognise/repair faster")
+    ap.add_argument("--lesion-type-b-enabled", action=argparse.BooleanOptionalAction, default=False,
+                    help="config4: include Type-B (GG-NER) lesions. DEFAULT OFF -> only Type-A lesions "
+                         "(the Type-A count is unchanged, no backfill). Pass --lesion-type-b-enabled to add Type-B.")
 
     args = ap.parse_args()
     CHAIN = int(args.chain)
@@ -622,12 +665,12 @@ def main():
     od = Path(args.out_dir)
     od.mkdir(parents=True, exist_ok=True)
     sfx = args.suffix
-    (od / f"config1_{sfx}.yaml").write_text(build(True, bounds, bstrength, genes, calibration, args.num_chains, args.separation))
-    (od / f"config2_{sfx}.yaml").write_text(build(False, bounds, bstrength, genes, calibration, args.num_chains, args.separation))
+    (od / f"config1_{sfx}.yaml").write_text(build(True, bounds, bstrength, genes, calibration, args.num_chains, args.separation, gap_frac=args.gap_frac))
+    (od / f"config2_{sfx}.yaml").write_text(build(False, bounds, bstrength, genes, calibration, args.num_chains, args.separation, gap_frac=args.gap_frac))
     # config3 = byte-identical to config2 (txn OFF) except every boundary strength is
     # X times larger (--bstr-mult). Stronger insulation, same domain skeleton/genes.
     bstrength_x = np.round(np.minimum(bstrength * args.bstr_mult, 1.0), 2)
-    (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation))
+    (od / f"config3_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation, gap_frac=args.gap_frac))
     # config4 = config3 (txn OFF, stronger CTCF) + UV lesions. Stage durations are
     # biological seconds converted to ticks at this tick size; shorter TADs carry
     # more lesions (size exponent) but recognise/repair them faster (repair exponent).
@@ -642,8 +685,9 @@ def main():
         block_prob=args.lesion_block_prob,
         tad_size_exponent=args.lesion_tad_size_exponent,
         tad_repair_exponent=args.lesion_tad_repair_exponent,
+        type_b_enabled=args.lesion_type_b_enabled,
     )
-    (od / f"config4_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation, lesions=lesion_params))
+    (od / f"config4_{sfx}.yaml").write_text(build(False, bounds, bstrength_x, genes, calibration, args.num_chains, args.separation, lesions=lesion_params, gap_frac=args.gap_frac))
     # stats
     lens = [abs(g["tes"] - g["tss"]) for g in genes]
     nenh = [len(g.get("enhancers", [])) for g in genes]

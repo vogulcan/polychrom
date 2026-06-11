@@ -1122,7 +1122,7 @@ def run(cfg) -> Path:
         lesions = fh["lesions"][:] if "lesions" in fh else None
         genes_ds = fh["genes"][:] if "genes" in fh else None
 
-    boundaries = list(cfg.lef.topology_kwargs.get("tad_positions", [])) if isinstance(cfg.lef.topology_kwargs, dict) else []
+    boundaries = annotate.boundaries_from_topology_kwargs(cfg.lef.topology_kwargs, chain_length)
     # TADs for the 3D analysis are derived per-resolution inside the 3D block
     # (see scale_resolution_coords); the 1D metrics below only need boundaries.
     anch = anchor_set(boundaries, chain_length)

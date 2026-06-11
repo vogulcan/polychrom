@@ -56,6 +56,7 @@ CORE_LABELS = {
     "boundary_pass_event": "Boundary pass\nevents",
     "mean_loop_length": "Mean loop\nlength",
     "boundary_crossing_stripe": "Boundary-crossing\nstripe",
+    "corner_dot": "Corner dot\n(both anchors)",
 }
 CORE_ORDER = list(CORE_LABELS)
 
@@ -89,13 +90,41 @@ def _safe_label(label: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", label).strip("_") or "run"
 
 
+def _tad_intervals(kwargs: dict, chain: int) -> list[tuple[int, int]]:
+    """Per-TAD ``(left, right)`` inclusive anchor sites from either schema.
+
+    The new ``tads`` schema lists each TAD's anchors directly; the legacy
+    ``tad_positions`` form tiles the chain into intervals ``[start, end)`` whose
+    convergent anchors sit at ``start`` (left) and ``end - 1`` (right).
+    """
+    tads = kwargs.get("tads")
+    if tads:
+        return sorted(((int(t["left"]), int(t["right"])) for t in tads), key=lambda lr: lr[0])
+    tad_positions = [int(x) for x in kwargs.get("tad_positions", [])]
+    edges = [0, *tad_positions, chain]
+    return [(s, e - 1) for s, e in zip(edges[:-1], edges[1:])]
+
+
+def _interior_boundaries(records: list[tuple[int, int]], chain: int) -> list[int]:
+    """Reconstructed interior segment edges (legacy positions; both gap edges)."""
+    inner: set[int] = set()
+    for left, right in records:
+        if left > 0:
+            inner.add(left)
+        if right + 1 < chain:
+            inner.add(right + 1)
+    return sorted(inner)
+
+
 def _topology(cfg: dict) -> dict:
     lef = cfg["lef"]
     kwargs = lef["topology_kwargs"]
     chain = int(lef["chain_length"])
     num_chains = int(lef["num_chains"])
-    tad_positions = [int(x) for x in kwargs.get("tad_positions", [])]
-    edges = np.array([0, *tad_positions, chain], dtype=int)
+
+    records = _tad_intervals(kwargs, chain)
+    boundaries = _interior_boundaries(records, chain)
+    edges = np.array([0, *boundaries, chain], dtype=int)
 
     gene_mask = np.zeros(chain, dtype=bool)
     for gene in kwargs.get("genes", []):
@@ -104,25 +133,40 @@ def _topology(cfg: dict) -> dict:
         hi = max(0, min(chain - 1, hi))
         gene_mask[lo : hi + 1] = True
 
-    # Directional convergent TAD topology has internal anchors flanking a
-    # boundary p: right-facing anchor at p - 1, left-facing anchor at p.
-    ctcf_mask = np.zeros(chain, dtype=bool)
-    for pos in tad_positions:
-        if 0 <= pos - 1 < chain:
-            ctcf_mask[pos - 1] = True
-        if 0 <= pos < chain:
-            ctcf_mask[pos] = True
+    # Oriented inward-facing anchors per TAD: the left-facing anchor (captures the
+    # leftward -1 leg) sits at ``left``; the right-facing anchor (captures the
+    # rightward +1 leg) at ``right``. Chromosome-end anchors (site 0 / chain-1)
+    # are excluded so the COMBINED mask reproduces the legacy internal-anchor
+    # convention exactly (right anchor p-1 + left anchor p for each boundary p),
+    # and so the corner-dot metric counts only internal convergent pairs.
+    left_ctcf_mask = np.zeros(chain, dtype=bool)
+    right_ctcf_mask = np.zeros(chain, dtype=bool)
+    corner_pairs: dict[int, tuple[int, int]] = {}
+    for idx, (left, right) in enumerate(records):
+        left_internal = 0 < left < chain
+        right_internal = 0 <= right < chain - 1
+        if left_internal:
+            left_ctcf_mask[left] = True
+        if right_internal:
+            right_ctcf_mask[right] = True
+        if left_internal and right_internal:
+            corner_pairs[idx] = (left, right)
+    ctcf_mask = left_ctcf_mask | right_ctcf_mask
 
     return {
         "chain": chain,
         "num_chains": num_chains,
         "edges": edges,
-        "tad_positions": np.array(tad_positions, dtype=np.int32),
+        "tad_positions": np.array(boundaries, dtype=np.int32),
         "gene_mask": gene_mask,
         "ctcf_mask": ctcf_mask,
+        "left_ctcf_mask": left_ctcf_mask,
+        "right_ctcf_mask": right_ctcf_mask,
+        "corner_pairs": corner_pairs,
+        "n_tads_corner": len(corner_pairs),
         "gene_sites": int(gene_mask.sum()),
         "ctcf_sites": int(ctcf_mask.sum()),
-        "boundaries": len(tad_positions),
+        "boundaries": len(boundaries),
         "tads": len(edges) - 1,
     }
 
@@ -137,6 +181,10 @@ def _validate_compatible(top1: dict, top2: dict) -> None:
         raise ValueError("Gene-body masks differ between configs; folds would not be topology-matched")
     if not np.array_equal(top1["ctcf_mask"], top2["ctcf_mask"]):
         raise ValueError("CTCF anchor masks differ between configs; folds would not be topology-matched")
+    if not np.array_equal(top1["left_ctcf_mask"], top2["left_ctcf_mask"]):
+        raise ValueError("Left-facing CTCF anchors differ between configs; folds would not be orientation-matched")
+    if not np.array_equal(top1["right_ctcf_mask"], top2["right_ctcf_mask"]):
+        raise ValueError("Right-facing CTCF anchors differ between configs; folds would not be orientation-matched")
 
 
 def _load_positions(h5_path: Path) -> np.ndarray:
@@ -352,6 +400,16 @@ def analyze_run(
     exactly_one_ctcf = same_chain & (left_ctcf ^ right_ctcf)
     boundary_crossing_stripe = exactly_one_ctcf & cross_tad
 
+    # Corner dot: a single LEF whose lower leg sits on a TAD's left-facing anchor
+    # AND whose upper leg sits on the SAME TAD's right-facing anchor (both legs
+    # captured at the two convergent anchors of one internal TAD). corner_pairs
+    # already excludes chromosome-end anchors, so this is the internal-only dot.
+    corner_pairs = topo["corner_pairs"]
+    n_tads_corner = max(topo["n_tads_corner"], 1)
+    corner_dot = np.zeros_like(same_chain, dtype=bool)
+    for left_site, right_site in corner_pairs.values():
+        corner_dot |= same_chain & (lo_rel == left_site) & (hi_rel == right_site)
+
     prev = pos[:-1]
     curr = pos[1:]
 
@@ -373,6 +431,7 @@ def analyze_run(
         cross_tad_count = int((cross_tad & (lo_chain == chain_idx)).sum())
         multi_tad_count = int((multi_tad & (lo_chain == chain_idx)).sum())
         crossed_boundary_total = int((crossed_boundary_count * (lo_chain == chain_idx)).sum())
+        corner_dot_count = int((corner_dot & (lo_chain == chain_idx)).sum())
 
         pass_events = 0
         moving_steps = 0
@@ -409,6 +468,11 @@ def analyze_run(
                 stripe_cross_count / (frames * n_boundaries),
                 stripe_cross_count,
                 frames * n_boundaries,
+            ),
+            "corner_dot": (
+                corner_dot_count / (frames * n_tads_corner),
+                corner_dot_count,
+                frames * n_tads_corner,
             ),
         }
         for metric, (raw_value, raw_count, denominator) in core_metrics.items():
@@ -636,8 +700,15 @@ def _draw_metric_panel(
 ) -> None:
     sub_metric = metrics[metrics["metric"] == metric]
     values = sub_metric["fold_vs_config1_mean"].to_numpy(dtype=float)
-    y_min = min(0.78, float(np.nanmin(values)) * 0.92)
-    y_max_points = max(1.22, float(np.nanmax(values)) * 1.08)
+    # Folds are NaN/Inf when the config1 baseline mean is 0 (e.g. a metric like
+    # corner_dot that never fires in a short run). Derive axis limits from finite
+    # values only and fall back to a default window so the panel still renders.
+    finite = values[np.isfinite(values)]
+    if finite.size:
+        y_min = min(0.78, float(finite.min()) * 0.92)
+        y_max_points = max(1.22, float(finite.max()) * 1.08)
+    else:
+        y_min, y_max_points = 0.78, 1.22
     y_range = max(y_max_points - y_min, 0.25)
     annot_y = y_max_points + 0.04 * y_range
     y_top = annot_y + 0.13 * y_range
@@ -656,14 +727,16 @@ def _draw_metric_panel(
             alpha=0.95,
             zorder=3,
         )
-        ax.hlines(
-            float(y.mean()),
-            offset - 0.075,
-            offset + 0.075,
-            color=colors[label],
-            linewidth=2.2,
-            zorder=4,
-        )
+        finite_y = y[np.isfinite(y)]
+        if finite_y.size:
+            ax.hlines(
+                float(finite_y.mean()),
+                offset - 0.075,
+                offset + 0.075,
+                color=colors[label],
+                linewidth=2.2,
+                zorder=4,
+            )
 
     stat = stats[stats["metric"] == metric].iloc[0]
     ax.text(
@@ -708,6 +781,7 @@ def plot_metric_panels_svg(
         ("Core", "cohesin_gene_body", CORE_LABELS["cohesin_gene_body"], core_metrics, core_stats),
         ("Core", "cohesin_ctcf_boundary", CORE_LABELS["cohesin_ctcf_boundary"], core_metrics, core_stats),
         ("Core", "mean_loop_length", CORE_LABELS["mean_loop_length"], core_metrics, core_stats),
+        ("Core", "corner_dot", CORE_LABELS["corner_dot"], core_metrics, core_stats),
         ("Boundary", "boundary_pass_event", BOUNDARY_LABELS["boundary_pass_event"], boundary_metrics, boundary_stats),
         ("Boundary", "cross_tad_occupancy", BOUNDARY_LABELS["cross_tad_occupancy"], boundary_metrics, boundary_stats),
         ("Boundary", "crossed_boundaries", BOUNDARY_LABELS["crossed_boundaries"], boundary_metrics, boundary_stats),

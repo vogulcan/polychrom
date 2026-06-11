@@ -163,7 +163,7 @@ def _load(cfg, label: str, cutoff: Optional[float] = None) -> RunData:
         les = fh["lesions"][:] if "lesions" in fh else None
         genes_ds = fh["genes"][:] if "genes" in fh else None
 
-    boundaries = list(cfg.lef.topology_kwargs.get("tad_positions", []))
+    boundaries = annotate.boundaries_from_topology_kwargs(cfg.lef.topology_kwargs, chain_length)
     tads = [(s, e) for s, e in zip([0, *boundaries], [*boundaries, chain_length])]
     config_genes = cfg.lef.topology_kwargs.get("genes", [])
     gene_source = genes_ds if genes_ds is not None else config_genes

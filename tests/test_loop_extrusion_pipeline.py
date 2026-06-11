@@ -1,3 +1,5 @@
+import hashlib
+
 import h5py
 import numpy as np
 import pytest
@@ -637,6 +639,54 @@ def test_lesion_repair_faster_in_shorter_tads():
     assert 0.6 < (s0 / l0) < 1.6
 
 
+def test_lesion_type_b_disable_preserves_type_a():
+    """lesion_type_b_enabled=False keeps ONLY Type-A lesions at the same count
+    they have when B is on (no Type-B, no Type-A backfill)."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import (
+        precompute_lesion_fields, update_lesions, LESION_TYPE_A, LESION_TYPE_B,
+    )
+    genes = build_genes([{"tss": 20, "tes": 60}, {"tss": 120, "tes": 160}])
+
+    def make_args(b_enabled):
+        args = {"N": 200, "chain_length": 200, "num_chains": 1, "genes": genes,
+                "lesion_spacing": 4, "lesion_type_a_prob": 0.5,
+                "lesion_prerecognition_ticks": 5, "lesion_repair_ticks": 5,
+                "lesion_type_b_enabled": b_enabled}
+        precompute_lesion_fields(args, tad_positions=[100], gene_objs=genes,
+                                 tad_size_exponent=1.0, spacing=4)
+        return args
+
+    # target_a follows the calculation: target * gene_body_mass * type_a_prob.
+    a = make_args(True)
+    gene_body_mass = float(a["lesion_site_p"][a["gene_body_mask"]].sum())
+    assert a["lesion_target_a"] == round(a["lesion_target"] * gene_body_mass * 0.5)
+    target_a = a["lesion_target_a"]
+    assert 0 < target_a < a["lesion_target"]
+
+    # B disabled: every lesion is Type A, count pinned at target_a, no Type B.
+    d = make_args(False)
+    np.random.seed(0)
+    nB = 0
+    for _ in range(80):
+        update_lesions(d)
+        vals = list(d["lesions"].values())
+        assert len(vals) == target_a
+        assert all(l.ltype == LESION_TYPE_A for l in vals)
+        nB += sum(1 for l in vals if l.ltype == LESION_TYPE_B)
+    assert nB == 0
+
+    # B enabled: total holds at target; mean Type-A ~ target_a (matches disabled).
+    e = make_args(True)
+    np.random.seed(0)
+    a_counts = []
+    for _ in range(80):
+        update_lesions(e)
+        vals = list(e["lesions"].values())
+        assert len(vals) == e["lesion_target"]
+        a_counts.append(sum(1 for l in vals if l.ltype == LESION_TYPE_A))
+    assert abs(float(np.mean(a_counts)) - target_a) <= 0.15 * target_a + 2
+
+
 def test_load_targeted_places_near_loading_site():
     occupied = np.zeros(100, dtype=np.int8)
     args = {"N": 100, "chain_length": 100, "num_chains": 1,
@@ -924,10 +974,12 @@ def test_convergent_tad_boundary_strength_per_anchor():
         boundary_strength=bs,
         include_chromosome_ends=True,
     )
-    # Left-facing anchor keyed by interval start position.
-    assert args["ctcfCapture"][-1] == {0: 0.1, 160: 0.2, 320: 0.3, 480: 0.4, 640: 0.5}
-    # Right-facing anchor sits at end - 1 but takes the end boundary's strength.
-    assert args["ctcfCapture"][1] == {159: 0.2, 319: 0.3, 479: 0.4, 639: 0.5, 799: 0.6}
+    # Left-facing anchor keyed by interval start position. The chromosome-start
+    # anchor (site 0) is forced to a hard 1.0 wall, overriding any bs entry.
+    assert args["ctcfCapture"][-1] == {0: 1.0, 160: 0.2, 320: 0.3, 480: 0.4, 640: 0.5}
+    # Right-facing anchor sits at end - 1 but takes the end boundary's strength;
+    # the chromosome-end anchor (site 799) is forced to a hard 1.0 wall.
+    assert args["ctcfCapture"][1] == {159: 0.2, 319: 0.3, 479: 0.4, 639: 0.5, 799: 1.0}
 
 
 def test_convergent_tad_boundary_strength_default_fallback():
@@ -939,7 +991,8 @@ def test_convergent_tad_boundary_strength_default_fallback():
         include_chromosome_ends=True,
         default_boundary_strength=0.05,
     )
-    assert args["ctcfCapture"][-1] == {0: 0.05, 160: 0.9, 320: 0.05}
+    # Site 0 is the chromosome start -> forced 1.0; 160 from bs; 320 from default.
+    assert args["ctcfCapture"][-1] == {0: 1.0, 160: 0.9, 320: 0.05}
 
 
 def test_convergent_tad_boundary_strength_scalar_backward_compat():
@@ -950,8 +1003,404 @@ def test_convergent_tad_boundary_strength_scalar_backward_compat():
         boundary_strength=0.7,
         include_chromosome_ends=True,
     )
-    assert set(args["ctcfCapture"][-1].values()) == {0.7}
-    assert set(args["ctcfCapture"][1].values()) == {0.7}
+    # Interior anchors take the scalar 0.7; the two chromosome ends (sites 0 and
+    # 799) are forced to hard 1.0 walls.
+    assert args["ctcfCapture"][-1] == {0: 1.0, 160: 0.7, 320: 0.7}
+    assert args["ctcfCapture"][1] == {159: 0.7, 319: 0.7, 799: 1.0}
+
+
+# ---------------------------------------------------------------------------
+# Golden regression guardrails for the per-TAD oriented-boundary refactor.
+#
+# These freeze the CURRENT behavior of the convergent topology + 1D dynamics so
+# that the staged refactor (topology canonicaliser, tads: schema, /ctcf_anchors
+# persistence) can be proven non-regressing. The convergent topology and the
+# gene-aware-convergent + RNAPII path are the exact code paths being refactored;
+# the lesion fields depend on the reconstructed tad_positions. If any of these
+# hashes change, a refactor step altered behavior it must not.
+# ---------------------------------------------------------------------------
+
+def _positions_hash(h5_path) -> str:
+    with h5py.File(h5_path, "r") as fh:
+        pos = fh["positions"][:]
+    return hashlib.sha256(np.ascontiguousarray(pos).tobytes()).hexdigest()[:16]
+
+
+def _f64_hash(arr) -> str:
+    a = np.ascontiguousarray(np.asarray(arr, dtype=np.float64))
+    return hashlib.sha256(a.tobytes()).hexdigest()[:16]
+
+
+def test_golden_convergent_cohesin_trajectory(tmp_path):
+    """Plain cohesin (convergent topology, no RNAPII/lesions) trajectory is frozen."""
+    h5 = tmp_path / "plain.h5"
+    cfg_path = tmp_path / "plain.yaml"
+    cfg_path.write_text(
+        f"""
+lef:
+  chain_length: 300
+  num_chains: 2
+  separation: 50
+  trajectory_length: 80
+  warmup_steps: 20
+  chunk_size: 10
+  seed: 12345
+  output_path: {h5}
+  topology_kwargs:
+    tad_positions: [100, 200]
+    boundary_strength: {{100: 0.5, 200: 0.7}}
+    default_boundary_strength: 0.3
+    release_prob: 0.0
+  plugins:
+    topology: polychrom.pipelines.loop_extrusion.plugins.topology:convergent_tad_topology
+"""
+    )
+    lef_stage.run(load_config(cfg_path).lef)
+    assert _positions_hash(h5) == "c33a0bf3e6f40cd8"
+
+
+def test_golden_gene_aware_convergent_rnapii_trajectory(tmp_path):
+    """gene_aware_convergent topology + RNAPII trajectory is frozen (proves the
+    boundary refactor does not perturb RNAPII dynamics)."""
+    h5 = tmp_path / "rnapii.h5"
+    cfg_path = tmp_path / "rnapii.yaml"
+    cfg_path.write_text(
+        f"""
+lef:
+  chain_length: 300
+  num_chains: 1
+  separation: 50
+  trajectory_length: 80
+  warmup_steps: 20
+  chunk_size: 10
+  seed: 999
+  max_rnapii: 8
+  output_path: {h5}
+  topology_kwargs:
+    tad_positions: [100, 200]
+    boundary_strength: {{100: 0.5, 200: 0.7}}
+    default_boundary_strength: 0.3
+    release_prob: 0.0
+    replicate_genes_across_chains: true
+    rnapii_stride: 1
+    genes:
+      - {{tss: 40, tes: 90, load_prob: 0.05}}
+      - {{tss: 250, tes: 160, load_prob: 0.05}}
+  plugins:
+    topology: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load: polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
+    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
+"""
+    )
+    lef_stage.run(load_config(cfg_path).lef)
+    assert _positions_hash(h5) == "8ad923dfa870611c"
+
+
+def test_golden_lesion_fields_for_tad_positions():
+    """Lesion placement/repair fields derived from tad_positions are frozen, so
+    the tads: reconstruction can be proven to reproduce them for the no-gap case."""
+    from polychrom.pipelines.loop_extrusion.plugins.lesions import precompute_lesion_fields
+
+    gene = build_genes([{"tss": 120, "tes": 180}])[0]
+    args = {"N": 400, "chain_length": 400, "num_chains": 1, "genes": [gene],
+            "lesion_type_a_prob": 0.25}
+    precompute_lesion_fields(args, tad_positions=[100, 250], gene_objs=[gene],
+                             tad_size_exponent=1.0, tad_repair_exponent=1.0, spacing=8)
+    assert args["lesion_target"] == 50
+    assert _f64_hash(args["lesion_site_p"]) == "4b76fa9710050276"
+    assert _f64_hash(args["lesion_rate_mult"]) == "4ff2ea7971b60f17"
+    assert _f64_hash(args["gene_body_mask"]) == "6685f4dea786526a"
+
+
+# ---------------------------------------------------------------------------
+# Per-TAD oriented-boundary schema (tads:) — Phase 2.
+# ---------------------------------------------------------------------------
+
+def test_tads_schema_per_tad_anchor_placement():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[
+            {"left": 0, "right": 159, "left_strength": 0.2, "right_strength": 0.25},
+            {"left": 200, "right": 399, "left_strength": 0.3, "right_strength": 0.35},
+        ],
+        include_chromosome_ends=True,
+    )
+    # Left anchors capture the -1 leg; site 0 is forced to a hard 1.0 wall.
+    assert args["ctcfCapture"][-1] == {0: 1.0, 200: 0.3}
+    # Right anchors capture the +1 leg; 399 is interior so keeps its strength.
+    assert args["ctcfCapture"][1] == {159: 0.25, 399: 0.35}
+
+
+def test_tads_schema_independent_side_strengths():
+    cfg = LEFConfig(chain_length=500, num_chains=1, separation=500)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[{"left": 100, "right": 300, "left_strength": 0.4, "right_strength": 0.9}],
+    )
+    assert args["ctcfCapture"][-1] == {100: 0.4}
+    assert args["ctcfCapture"][1] == {300: 0.9}
+
+
+def test_tads_schema_gap_has_no_anchors():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[
+            {"left": 0, "right": 159, "left_strength": 0.2, "right_strength": 0.25},
+            {"left": 200, "right": 399, "left_strength": 0.3, "right_strength": 0.35},
+        ],
+    )
+    occupied = set(args["ctcfCapture"][-1]) | set(args["ctcfCapture"][1])
+    # Gap [160, 199] and trailing region [400, 799] carry no anchors.
+    assert occupied.isdisjoint(range(160, 200))
+    assert occupied.isdisjoint(range(400, 800))
+
+
+def test_tads_default_strength_fallback():
+    cfg = LEFConfig(chain_length=600, num_chains=1, separation=600)
+    args = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[{"left": 100, "right": 200}],  # strengths omitted
+        default_boundary_strength=0.07,
+    )
+    assert args["ctcfCapture"][-1] == {100: 0.07}
+    assert args["ctcfCapture"][1] == {200: 0.07}
+
+
+def test_tads_equivalent_to_legacy_tad_positions():
+    """A gap-free tads layout reproduces the legacy tad_positions output exactly."""
+    cfg = LEFConfig(chain_length=800, num_chains=2, separation=400)
+    legacy = topology_plugins.convergent_tad_topology(
+        cfg,
+        tad_positions=[160, 320],
+        boundary_strength={160: 0.2, 320: 0.3},
+        default_boundary_strength=0.05,
+    )
+    tads = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[
+            {"left": 0, "right": 159, "left_strength": 1.0, "right_strength": 0.2},
+            {"left": 160, "right": 319, "left_strength": 0.2, "right_strength": 0.3},
+            {"left": 320, "right": 799, "left_strength": 0.3, "right_strength": 1.0},
+        ],
+    )
+    assert tads["ctcfCapture"] == legacy["ctcfCapture"]
+    assert tads["ctcfRelease"] == legacy["ctcfRelease"]
+
+
+def test_tads_reconstructs_boundaries_for_downstream():
+    cfg = LEFConfig(chain_length=800, num_chains=1, separation=800)
+    nogap = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[
+            {"left": 0, "right": 159},
+            {"left": 160, "right": 319},
+            {"left": 320, "right": 799},
+        ],
+    )
+    # Abutting layout reconstructs exactly the legacy interior boundaries.
+    assert nogap["tad_positions"] == [160, 320]
+
+    gapped = topology_plugins.convergent_tad_topology(
+        cfg,
+        tads=[{"left": 0, "right": 159}, {"left": 200, "right": 399}],
+    )
+    # Both edges of the gap appear, keeping the chain fully tiled by segments.
+    assert gapped["tad_positions"] == [160, 200, 400]
+
+
+def test_tads_and_tad_positions_are_mutually_exclusive():
+    cfg = LEFConfig(chain_length=400, num_chains=1, separation=400)
+    with pytest.raises(ValueError):
+        topology_plugins.convergent_tad_topology(
+            cfg, tad_positions=[100], tads=[{"left": 0, "right": 99}]
+        )
+
+
+def test_tads_reject_overlap():
+    cfg = LEFConfig(chain_length=400, num_chains=1, separation=400)
+    with pytest.raises(ValueError):
+        topology_plugins.convergent_tad_topology(
+            cfg, tads=[{"left": 0, "right": 150}, {"left": 100, "right": 200}]
+        )
+
+
+def test_tads_reject_out_of_range():
+    cfg = LEFConfig(chain_length=400, num_chains=1, separation=400)
+    with pytest.raises(ValueError):
+        topology_plugins.convergent_tad_topology(
+            cfg, tads=[{"left": 300, "right": 400}]  # right == chain_length (out of range)
+        )
+
+
+def test_tads_lesion_fields_match_legacy_no_gap():
+    """gene_aware_convergent with a gap-free tads layout reproduces the lesion
+    placement/repair fields of the equivalent legacy tad_positions config."""
+    cfg = LEFConfig(chain_length=400, num_chains=1, separation=400)
+    common = dict(
+        lesion_spacing=8, lesion_type_a_prob=0.25,
+        lesion_prerecognition_ticks=50, lesion_repair_ticks=50,
+        lesion_tad_size_exponent=1.0, lesion_tad_repair_exponent=1.0,
+    )
+    legacy = topology_plugins.gene_aware_convergent_tad_topology(
+        cfg, tad_positions=[100, 250],
+        boundary_strength={100: 0.2, 250: 0.3}, default_boundary_strength=0.1,
+        **common,
+    )
+    tads = topology_plugins.gene_aware_convergent_tad_topology(
+        cfg,
+        tads=[
+            {"left": 0, "right": 99, "left_strength": 1.0, "right_strength": 0.2},
+            {"left": 100, "right": 249, "left_strength": 0.2, "right_strength": 0.3},
+            {"left": 250, "right": 399, "left_strength": 0.3, "right_strength": 1.0},
+        ],
+        **common,
+    )
+    assert tads["tad_positions"] == [100, 250]
+    assert np.array_equal(tads["lesion_site_p"], legacy["lesion_site_p"])
+    assert np.array_equal(tads["lesion_rate_mult"], legacy["lesion_rate_mult"])
+
+
+def test_tads_gap_lesion_fields_are_finite_and_normalised():
+    """With a gap, the reconstructed full tiling keeps lesion fields well-defined
+    (no uninitialised np.empty leaking into placement/repair)."""
+    cfg = LEFConfig(chain_length=400, num_chains=1, separation=400)
+    args = topology_plugins.gene_aware_convergent_tad_topology(
+        cfg,
+        tads=[{"left": 0, "right": 99}, {"left": 200, "right": 399}],
+        lesion_spacing=8, lesion_tad_size_exponent=1.0, lesion_tad_repair_exponent=1.0,
+    )
+    site_p = np.asarray(args["lesion_site_p"], dtype=float)
+    rate_mult = np.asarray(args["lesion_rate_mult"], dtype=float)
+    assert np.all(np.isfinite(site_p)) and np.all(site_p >= 0)
+    assert site_p.sum() == pytest.approx(1.0)
+    assert np.all(np.isfinite(rate_mult)) and np.all(rate_mult > 0)
+
+
+# ---------------------------------------------------------------------------
+# /ctcf_anchors H5 persistence — Phase 3.
+# ---------------------------------------------------------------------------
+
+def test_h5_ctcf_anchor_roundtrip(tmp_path):
+    h5 = tmp_path / "anchors.h5"
+    cfg_path = tmp_path / "anchors.yaml"
+    cfg_path.write_text(
+        f"""
+lef:
+  chain_length: 200
+  num_chains: 2
+  separation: 50
+  trajectory_length: 30
+  chunk_size: 10
+  seed: 3
+  output_path: {h5}
+  topology_kwargs:
+    tads:
+      - {{left: 0, right: 79, left_strength: 0.4, right_strength: 0.5}}
+      - {{left: 100, right: 199, left_strength: 0.6, right_strength: 0.7}}
+  plugins:
+    topology: polychrom.pipelines.loop_extrusion.plugins.topology:convergent_tad_topology
+"""
+    )
+    lef_stage.run(load_config(cfg_path).lef)
+
+    with h5py.File(h5, "r") as fh:
+        assert "ctcf_anchors" in fh
+        a = fh["ctcf_anchors"][:]
+        assert fh.attrs["boundary_model"] == "per_tad_oriented"
+        assert int(fh.attrs["ctcf_anchor_schema_version"]) == 1
+        assert int(fh.attrs["ctcf_anchors_per_chain"]) == 4
+
+    assert set(a.dtype.names) == {
+        "abs_position", "chain_position", "chain_index",
+        "side", "strength", "tad_index", "edge",
+    }
+    assert len(a) == 8  # 4 anchors/chain x 2 chains
+    # Absolute position indexes directly into the (folded) positions dataset.
+    assert np.array_equal(a["abs_position"], a["chain_position"] + a["chain_index"] * 200)
+    # Chain-0 ground truth: site 0 forced 1.0 (-1), 79 -> 0.5 (+1),
+    # 100 -> 0.6 (-1), 199 forced 1.0 (+1).
+    c0 = a[a["chain_index"] == 0]
+    by_site = {int(r["chain_position"]): r for r in c0}
+
+    def check(site, side, strength, tad_index, edge):
+        r = by_site[site]
+        assert (int(r["side"]), int(r["tad_index"]), int(r["edge"])) == (side, tad_index, edge)
+        assert float(r["strength"]) == pytest.approx(strength, abs=1e-6)
+
+    check(0, -1, 1.0, 0, 0)        # chromosome start forced to 1.0
+    check(79, 1, 0.5, 0, 1)
+    check(100, -1, 0.6, 1, 0)
+    check(199, 1, 1.0, 1, 1)       # chromosome end forced to 1.0
+
+
+def test_h5_no_ctcf_anchors_for_uniform_topology(tmp_path):
+    """Uniform (symmetric) topology exposes no anchor table -> dataset omitted."""
+    h5 = tmp_path / "uniform.h5"
+    cfg_path = tmp_path / "uniform.yaml"
+    cfg_path.write_text(
+        f"""
+lef:
+  chain_length: 200
+  num_chains: 1
+  separation: 60
+  trajectory_length: 30
+  chunk_size: 10
+  seed: 7
+  output_path: {h5}
+  topology_kwargs:
+    tad_positions: [50, 150]
+    capture_prob: 0.9
+    release_prob: 0.01
+    symmetric: true
+"""
+    )
+    lef_stage.run(load_config(cfg_path).lef)
+    with h5py.File(h5, "r") as fh:
+        assert "ctcf_anchors" not in fh
+        assert "boundary_model" not in fh.attrs
+
+
+# ---------------------------------------------------------------------------
+# Package consumers route boundaries through one helper — Phase 4.
+# ---------------------------------------------------------------------------
+
+def test_boundaries_from_topology_kwargs_both_schemas():
+    from polychrom.pipelines.loop_extrusion import annotate
+
+    f = annotate.boundaries_from_topology_kwargs
+    assert f({"tad_positions": [160, 320]}, 800) == [160, 320]
+    nogap = {"tads": [
+        {"left": 0, "right": 159}, {"left": 160, "right": 319}, {"left": 320, "right": 799},
+    ]}
+    assert f(nogap, 800) == [160, 320]               # gap-free == legacy interior bounds
+    gapped = {"tads": [{"left": 0, "right": 159}, {"left": 200, "right": 399}]}
+    assert f(gapped, 800) == [160, 200, 400]         # both gap edges retained
+    assert f({}, 800) == [] and f(None, 800) == []   # robust to missing/invalid
+
+
+def test_viewer_derive_tads_handles_tads_schema():
+    legacy = LEFConfig(chain_length=800, num_chains=1,
+                       topology_kwargs={"tad_positions": [160, 320]})
+    tads_cfg = LEFConfig(chain_length=800, num_chains=1, topology_kwargs={"tads": [
+        {"left": 0, "right": 159}, {"left": 160, "right": 319}, {"left": 320, "right": 799},
+    ]})
+    legacy_iv = [(t["start"], t["end"]) for t in viewer_stage.derive_tads(legacy)]
+    tads_iv = [(t["start"], t["end"]) for t in viewer_stage.derive_tads(tads_cfg)]
+    assert legacy_iv == tads_iv == [(0, 160), (160, 320), (320, 800)]
+
+
+def test_annotate_from_lef_cfg_reads_tads_boundaries():
+    from polychrom.pipelines.loop_extrusion import annotate
+
+    cfg = LEFConfig(chain_length=800, num_chains=1, topology_kwargs={"tads": [
+        {"left": 0, "right": 159}, {"left": 160, "right": 319}, {"left": 320, "right": 799},
+    ]})
+    ann = annotate.from_lef_cfg(cfg)
+    assert ann["boundaries"] == [160, 320]
 
 
 def test_contacts_can_replicate_map_starts_across_chains():

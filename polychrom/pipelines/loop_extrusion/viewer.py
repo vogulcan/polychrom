@@ -23,6 +23,7 @@ import h5py
 import numpy as np
 
 from . import _viewer_template
+from . import annotate
 from .config import LEFConfig, ViewerConfig, resolve_plugin
 from .progress import ProgressMeter, log
 
@@ -136,11 +137,14 @@ def derive_annotations(
 
 
 def derive_tads(lef_cfg: LEFConfig) -> List[dict]:
-    """Build original TAD intervals from ``tad_positions`` for every chain."""
-    inner = sorted({
-        int(p) for p in lef_cfg.topology_kwargs.get("tad_positions", [])
-        if 0 < int(p) < lef_cfg.chain_length
-    })
+    """Build original TAD intervals for every chain.
+
+    Boundaries come from either the legacy ``tad_positions`` or the per-TAD
+    ``tads`` schema via :func:`annotate.boundaries_from_topology_kwargs`.
+    """
+    inner = annotate.boundaries_from_topology_kwargs(
+        lef_cfg.topology_kwargs, lef_cfg.chain_length
+    )
     rel_bounds = [0, *inner, lef_cfg.chain_length]
     tads: List[dict] = []
     for chain_idx in range(lef_cfg.num_chains):
