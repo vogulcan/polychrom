@@ -16,6 +16,12 @@ micromamba run -n polychrom python scripts/compare_config_chain_metrics.py \
       --label1 Baseline \
       --label2 'Exp. 1'
 
+# Calculate transcription metrics
+micromamba run -n polychrom python scripts/gen_transcription_metrics.py \
+  --config configs/config1_${suffix}.yaml \
+  --h5 results/${suffix}_12/Baseline/LEFPositions.h5 \
+  --out-dir results/${suffix}_Baseline_TX
+
 # Boundary strength sweep (boundary strength multiplier) # ideal: 3.0
 micromamba run -n polychrom python scripts/sweep_rnapoff_boundary_strength_1d.py \
   --config1 configs/config1_${suffix}.yaml \
