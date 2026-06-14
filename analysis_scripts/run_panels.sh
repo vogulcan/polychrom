@@ -1,10 +1,13 @@
 suffix=5k
 chainlength=5000
-seed=42
-trajectory_length=20000 # (200k steps with 8s/tick = 44.4 hours)
+seed=1
+trajectory_length=20000
 tickseconds=8
 nreplicates=10
 nproc=36
+
+mkdir -p results
+mkdir -p configs
 
 micromamba run -n polychrom python scripts/gen_realistic_configs_variable_tick.py --chain ${chainlength} --num-chains ${nreplicates} --suffix ${suffix} --out-dir configs/ --seed ${seed} --tick-seconds ${tickseconds} --trajectory-length ${trajectory_length}
 
@@ -21,6 +24,13 @@ micromamba run -n polychrom python scripts/gen_transcription_metrics.py \
   --config configs/config1_${suffix}.yaml \
   --h5 results/${suffix}_12/Baseline/LEFPositions.h5 \
   --out-dir results/${suffix}_Baseline_TX
+
+# Cohesin moving-barrier evaluation (Banigan 2023): cohesin accumulation around
+# genes, transcription ON vs an auto-derived RNAPII-OFF control (ON-OFF difference)
+micromamba run -n polychrom python scripts/gen_cohesin_barrier_eval.py \
+  --config configs/config1_${suffix}.yaml \
+  --h5 results/${suffix}_12/Baseline/LEFPositions.h5 \
+  --out-dir results/${suffix}_Baseline_cohesin_barrier
 
 # Boundary strength sweep (boundary strength multiplier) # ideal: 3.0
 micromamba run -n polychrom python scripts/sweep_rnapoff_boundary_strength_1d.py \

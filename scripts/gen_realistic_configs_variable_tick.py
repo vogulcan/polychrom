@@ -72,14 +72,26 @@ REFERENCE_MD_STEPS_PER_BLOCK = 5000
 RESTART_EVERY_BLOCKS = 5000
 COHESIN_LIFETIME_SECONDS = 25 * 60
 CTCF_LIFETIME_BOOST = 4
-RNAP_LOAD_RATE = 0.001          # Banigan k_load ~0.001/s
+RNAP_LOAD_RATE = 0.002          # ACTIVE LOCI: 2x Banigan k_load (0.001/s) -> ~2 Pol/gene.
+                                # A "more-active-than-typical" locus that stays close to
+                                # Banigan's published loading rate (was 0.005 = 5x, which gave
+                                # ~4 Pol/gene and over-large folds). Needs pause_offset>0 + cap.
 RNAP_UNPAUSE_RATE = 0.002
-RNAP_UNBIND_RATE = 0.01         # 3' termination/unbind ~0.01/s -> dwell ~100 s (realistic
-                                # 3' Pol II; longer dwells made terminating Pol dominate the
-                                # state budget in 1D). Terminating Pol still acts as a 3' barrier.
-RNAP_SPEED_KB_PER_SECOND = 0.05 # 0.05 kb/s = 3 kb/min (real Pol II ~2-4 kb/min). Keeps
-                                # extrusion >= 5x faster than transcription (Banigan 3-5x).
-RNAP_BYPASS_SECONDS = 100.0     # active Pol II barrier: cohesin bypass time (Banigan tbypass ~100 s)
+RNAP_UNBIND_RATE = 0.005677     # 3' termination/unbind -> 3' dwell ~3.0 min (180 s, term_prob
+                                # 0.044). Upper-middle of the 1-8 min band (Cortazar 2019 /
+                                # Fong 2015); keeps a terminating Pol parked at the TES so the
+                                # 0.980 3' wall bites (the convergent-island / 3'-barrier lever).
+RNAP_SPEED_KB_PER_SECOND = 0.03 # 0.03 kb/s = 1.8 kb/min (low-normal Pol II; band 1.3-4.3).
+                                # Slowed from 0.05 so cohesin (0.125 kb/s per leg) out-paces RNAP
+                                # by ~4.2x -> back inside Banigan's required 3-5x extrusion:RNAP
+                                # ratio (was 2.5x, which made RNAP an over-strong barrier).
+RNAP_BYPASS_SECONDS = 100.0     # active/paused Pol II barrier: cohesin bypass ~100 s (block
+                                # 0.923) = Banigan tbypass exactly (k_bypass ~0.01/s). A weakly-
+                                # permeable moving barrier; the ON/OFF effect at a highly-active
+                                # locus comes from dense Pol, NOT from over-strong per-Pol block.
+RNAP_TERM_BYPASS_SECONDS = 159.0   # TERMINATING Pol 3' barrier, mildly DECOUPLED above the active
+                                # block: bypass ~159 s (block 0.951). Banigan-adjacent; terminating
+                                # Pol is a somewhat stronger 3' barrier (stationary post-termination).
 RNAP_POISED_BYPASS_SECONDS = 12.0  # POISED (pre-initiation) Pol II is a LEAKY barrier:
                                 # cohesin bypasses ~8x faster than active Pol II (~0.5 block @ 8 s)
 # RNAPII<->cohesin interference (per-ENCOUNTER probabilities; tick-INDEPENDENT, so emitted
@@ -135,7 +147,12 @@ DENS_POOR   = 7.0        # genes/Mb at min density
 # per-TAD class mix [hk_const, hk_high, celltype, dev] at max / min transcription
 FRAC_ACTIVE = np.array([0.35, 0.30, 0.30, 0.05])   # expressed-skewed
 FRAC_POOR   = np.array([0.45, 0.03, 0.20, 0.32])   # poised/silent-skewed
-TXN_NOISE   = 0.15       # how much transcription decouples from density
+TXN_NOISE   = 0.12       # how much transcription decouples from the size/density drivers
+TAD_SIZE_TXN_WEIGHT = 0.78   # transcription = this*(inverse TAD size) + (1-this)*density + noise.
+                             # LONGER TADs -> LESS transcription / fewer active genes (large
+                             # gene-poor domains ~ B-compartment; small domains ~ A-compartment).
+                             # Density already makes long TADs gene-POORER (fewer genes); this
+                             # makes the genes they do hold LESS active too.
 BSTR_RANGE  = (0.04, 0.13)  # boundary-strength gradient near pstall=1/8
 BSTR_NOISE  = 0.01
 BSTR_TXN_WEIGHT = 0.5        # boundary strength = this*flank_txn + (1-this)*flank_density;
@@ -200,6 +217,7 @@ def make_calibration(tick_seconds: float, trajectory_length=None, warmup_steps=N
         "rnap_load_prob": _rate_to_prob(RNAP_LOAD_RATE, tick_seconds),
         "rnap_termination_prob": _rate_to_prob(RNAP_UNBIND_RATE, tick_seconds),
         "rnap_block_prob": math.exp(-tick_seconds / RNAP_BYPASS_SECONDS),
+        "rnap_term_block_prob": math.exp(-tick_seconds / RNAP_TERM_BYPASS_SECONDS),
         "rnap_poised_block_prob": math.exp(-tick_seconds / RNAP_POISED_BYPASS_SECONDS),
         "class_ranges": {
             cls: {
@@ -269,7 +287,12 @@ def _make_gene(rng, tss, tes, cls, calibration):
              # stateful_translocate_rnapii uses rnapii_stride below; stride times
              # this probability preserves 0.1 kb/s on average for any tick.
              elongation_step_prob=round(calibration["elongation_step_prob"], 6),
-             pause_offset=0,
+             # pause_offset=1: paused Pol sits 1 site (1 kb) downstream of the TSS
+             # (realistic promoter-proximal pause site) so the TSS frees for the next
+             # loader -> enables the dense Pol "train" of highly-active loci. With
+             # offset 0 a paused Pol blocks its own TSS for the whole ~7 min pause,
+             # throttling re-loading to ~1 Pol/gene regardless of load_prob.
+             pause_offset=1,
              termination_prob=_round_prob(calibration["rnap_termination_prob"], 4))
     return g, C
 
@@ -439,8 +462,10 @@ def make_tad_records(bounds, bstrength, chain, gap_frac=0.0):
 
 def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separation=240,
           lesions=None, gap_frac=0.0):
-    # Pol II cap and relaxation/recording scale with locus size & chain count
-    max_rnapii = (max(64, int(2560 * (CHAIN / 30000) * (num_chains / 4))) if txn_on else 0)
+    # Pol II cap and relaxation/recording scale with locus size & chain count.
+    # Base raised 2560 -> 16000 for HIGHLY-ACTIVE LOCI: ~5-6 Pol/gene x ~73 genes/chain
+    # needs headroom well above the old ~1.5/gene cap, or dense loading is futile.
+    max_rnapii = (max(64, int(16000 * (CHAIN / 30000) * (num_chains / 4))) if txn_on else 0)
     lifetime = calibration["lifetime"]
     life_ctcf = calibration["lifetime_ctcf"]
     life_rnapii_stalled = lifetime
@@ -516,7 +541,7 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     rnapii_poised_block_prob: {_round_prob(calibration["rnap_poised_block_prob"], 3)}
     rnapii_paused_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
     rnapii_elongating_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
-    rnapii_terminating_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
+    rnapii_terminating_block_prob: {_round_prob(calibration["rnap_term_block_prob"], 3)}
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
     targeted_load_prob: 0.02
@@ -672,8 +697,18 @@ def main():
     )
     rng = np.random.default_rng(args.seed)
     bounds, dens = gen_tads(rng, args.short_spacing, args.long_spacing)
-    # transcription level per TAD: correlated with density but set independently
-    txn = np.clip([d + rng.normal(0, TXN_NOISE) for d in dens], 0.0, 1.0)
+    # transcription level per TAD: PRIMARILY driven by inverse TAD size (longer TADs
+    # = less transcription / fewer active genes), blended with the density latent and
+    # noise so the size->txn trend is strong but not deterministic. The rng.normal is
+    # drawn once per TAD (same count as before) so downstream draws are unperturbed.
+    _iv0 = list(zip([0, *bounds], [*bounds, CHAIN]))
+    _sz0 = np.array([hi - lo for lo, hi in _iv0], dtype=float)
+    _inv_size = 1.0 - (_sz0 - _sz0.min()) / (_sz0.max() - _sz0.min() + 1e-9)  # 1 = smallest TAD
+    txn = np.clip(
+        [TAD_SIZE_TXN_WEIGHT * iv + (1.0 - TAD_SIZE_TXN_WEIGHT) * d + rng.normal(0, TXN_NOISE)
+         for iv, d in zip(_inv_size, dens)],
+        0.0, 1.0,
+    )
     # boundary strength blends two drivers, both mapped into BSTR_RANGE:
     #   * flank TRANSCRIPTION -- active, Pol II-rich domains get stronger boundaries
     #     (transcription reinforces insulation), and
