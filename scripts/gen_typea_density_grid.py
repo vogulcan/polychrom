@@ -46,6 +46,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
+import h5py
 import numpy as np
 import pandas as pd
 import yaml
@@ -67,6 +68,7 @@ from gen_lesion_grid_and_heatmaps import (
     METRIC_LABELS,
     SEQ_CMAP,
     _CATEGORIES,
+    _LES_TYPE_A,
     _p_values,
     _run_grid_point,
     _safe_label,
@@ -84,6 +86,74 @@ from gen_lesion_grid_and_heatmaps import (
 
 def ta_label(type_a: float, spacing: int) -> str:
     return _safe_label(f"grid_ta{type_a:.3f}_s{spacing}")
+
+
+# Measured (from the H5 trajectory) Type-A lesion burden inside gene bodies.
+TYPEA_PERKB_KEY = "typea_per_kb_genebody"
+TYPEA_PERKB_LABELS = {
+    TYPEA_PERKB_KEY: "Type-A lesions per kb of gene body\n(measured from trajectory)",
+}
+
+
+def gene_body_mask(base: dict) -> np.ndarray:
+    """Boolean lattice mask (length N) marking gene-body sites for the baseline
+    genes + TAD layout (replicated across chains when configured). Mirrors the mask
+    inside ``gene_body_mass``. 1 monomer = 1 kb, so ``mask.sum()`` is the total
+    gene-body length in kb."""
+    lef = base["lef"]
+    tk = lef.get("topology_kwargs", {})
+    chain_length = int(lef["chain_length"])
+    num_chains = int(lef["num_chains"])
+    N = chain_length * num_chains
+    mask = np.zeros(N, dtype=bool)
+    replicate = bool(tk.get("replicate_genes_across_chains", False))
+    offsets = [c * chain_length for c in range(num_chains)] if replicate else [0]
+    for g in tk.get("genes") or []:
+        tss, tes = int(g["tss"]), int(g["tes"])
+        lo, hi = (tss, tes) if tss <= tes else (tes, tss)
+        for off in offsets:
+            a, b = off + lo, off + hi
+            if 0 <= a < N:
+                mask[a: min(b + 1, N)] = True
+    return mask
+
+
+def measure_typea_per_kb_genebody(
+    h5_path: Path, gb_mask: np.ndarray, *, chunk: int = 2000
+) -> float:
+    """Mean number of Type-A lesions present inside gene bodies, per kb of gene
+    body, measured DIRECTLY from the 1D trajectory (time-averaged over frames).
+
+    This is the *realised* Type-A burden a traversing cohesin sees -- it reflects
+    the lesion dynamics (placement, recognition, repair/removal) rather than the
+    analytic placement density ``P(A) x density``. Type-A lesions live only in gene
+    bodies, but we restrict to the gene-body mask explicitly and divide by the total
+    gene-body length (1 monomer = 1 kb), so the result is normalised over gene
+    bodies. Returns Type-A lesions / kb of gene body (NaN if no gene bodies or the
+    H5 has no lesion datasets)."""
+    gb_kb = int(gb_mask.sum())
+    if gb_kb <= 0:
+        return float("nan")
+    with h5py.File(h5_path, "r") as h:
+        if "lesions" not in h:
+            return float("nan")
+        N = int(h.attrs["N"])
+        ds_sites, ds_types = h["lesions"], h["lesion_types"]
+        frames = int(ds_sites.shape[0])
+        if frames <= 0:
+            return float("nan")
+        total = 0
+        for start in range(0, frames, chunk):
+            end = min(start + chunk, frames)
+            sites = ds_sites[start:end]
+            types = ds_types[start:end]
+            for k in range(end - start):
+                s, ty = sites[k], types[k]
+                valid = (s >= 0) & (s < N) & (ty == _LES_TYPE_A)
+                ss = s[valid]
+                if ss.size:
+                    total += int(gb_mask[ss].sum())
+        return total / frames / gb_kb
 
 
 def _measured_keys() -> list[str]:
@@ -190,6 +260,9 @@ def main() -> None:
     # at P(A)=1); a cell's actual Type-A density is x_density x its row's P(A).
     type_b_enabled = bool(args.lesion_type_b_enabled)
     gbm = gene_body_mass(base, float(lesion_defaults["tad_size_exponent"])) if not type_b_enabled else 1.0
+    # Gene-body mask + length (kb) for the measured Type-A-per-kb-of-gene-body readout.
+    gb_mask = gene_body_mask(base)
+    gb_kb = int(gb_mask.sum())
     density_axis = lesion_density_axis(
         sp_sorted, type_b_enabled=type_b_enabled, gbm=gbm, type_a_prob=1.0)
     x_label = ("Lesion density (lesions/Mbp)" if type_b_enabled
@@ -250,6 +323,7 @@ def main() -> None:
     raws = {m: np.full(shape, np.nan) for m in metrics_seen}
     folds = {m: np.full(shape, np.nan) for m in metrics_seen}
     measured = {k: np.full(shape, np.nan) for k in _measured_keys()}
+    measured[TYPEA_PERKB_KEY] = np.full(shape, np.nan)
 
     tasks = [
         {
@@ -277,8 +351,10 @@ def main() -> None:
             ms = measure_lesion_stall(
                 Path(h5_path), tick_seconds, chunk=args.measure_chunk,
                 prerecognition_ticks=prerec_ticks, repair_ticks=repair_t)
-            for k in measured:
+            for k in _measured_keys():
                 measured[k][ri, ci] = ms[k]
+            measured[TYPEA_PERKB_KEY][ri, ci] = measure_typea_per_kb_genebody(
+                Path(h5_path), gb_mask, chunk=args.measure_chunk)
 
     if jobs == 1:
         for n, task in enumerate(tasks, 1):
@@ -305,10 +381,23 @@ def main() -> None:
     sub = (f"STATIC block_prob={block_prob:g}, RNAPII off, "
            f"boundaries x{args.bstr_mult:g} (cap 1.0), tick={tick_seconds:g}s")
 
+    # Dual y-tick labels: the row's P(A) plus the per-row MEAN measured Type-A
+    # lesions per kb of gene body (averaged over that row's densities, from the
+    # trajectory). The exact per-cell values live in the dedicated panel below.
+    y_ticklabels = None
+    if not args.no_measure and gb_kb > 0:
+        row_mean = np.nanmean(measured[TYPEA_PERKB_KEY], axis=1)
+        y_ticklabels = [
+            f"{('∞' if not np.isfinite(v) else y_fmt.format(v))}\n({m:.4f}/kb)"
+            for v, m in zip(ta_sorted, row_mean)
+        ]
+        y_label = y_label + "\n(2nd line: mean measured Type-A / kb gene body)"
+
     fold_svg = out_dir / "ta_density_heatmaps.svg"
     plot_heatmaps(
         folds, METRIC_LABELS,
         y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+        y_ticklabels=y_ticklabels,
         out_path=fold_svg,
         title=f"Type A x density grid vs baseline 1D sim (fold = grid mean / baseline mean)\n{sub}",
         value_label="fold vs baseline mean",
@@ -335,10 +424,21 @@ def main() -> None:
     print(f"wrote {fold_tsv}")
 
     if not args.no_measure:
+        ta_perkb_svg = out_dir / "ta_density_typea_per_kb_genebody.svg"
+        plot_heatmaps(
+            measured, TYPEA_PERKB_LABELS,
+            y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
+            out_path=ta_perkb_svg,
+            title=(f"Measured Type-A lesion burden inside gene bodies (from trajectory)\n"
+                   f"gene-body length={gb_kb} kb; {sub}"),
+            value_label="Type-A lesions / kb gene body", cell_fmt="{:.4f}", center=None, cmap=SEQ_CMAP,
+        )
         occ_svg = out_dir / "ta_density_measured_stall.svg"
         plot_heatmaps(
             measured, MEASURED_LABELS,
             y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
             out_path=occ_svg,
             title=f"Measured per-lesion cohesin stall occupancy (from trajectory)\n{sub}",
             value_label="stalled cohesin legs per lesion", cell_fmt="{:.3f}", center=None, cmap=SEQ_CMAP,
@@ -347,6 +447,7 @@ def main() -> None:
         plot_heatmaps(
             measured, MEASURED_SECONDS_LABELS,
             y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
             out_path=sec_svg,
             title=f"Measured cohesin stall DURATION (s, per event, from trajectory)\n{sub}",
             value_label="stall duration (s)", cell_fmt="{:.0f}", center=None, cmap=SEQ_CMAP,
@@ -355,6 +456,7 @@ def main() -> None:
         plot_heatmaps(
             measured, MEASURED_BYTYPE_LABELS,
             y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
             out_path=bytype_svg,
             title=f"Measured cohesin stall by lesion type/state (mean s, from trajectory)\n{sub}",
             value_label="stall duration (s)", cell_fmt="{:.0f}", center=None, cmap=SEQ_CMAP,
@@ -363,6 +465,7 @@ def main() -> None:
         plot_heatmaps(
             measured, MEASURED_STAGEFRAC_LABELS,
             y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
             out_path=frac_svg,
             title=f"Measured cohesin stall / lesion stage lifetime (per-encounter mean, from trajectory)\n{sub}",
             value_label="stall / stage lifetime", cell_fmt="{:.2f}", center=None, cmap=SEQ_CMAP,
@@ -380,6 +483,7 @@ def main() -> None:
                     "effective_stall_seconds_analytic": eff_stall,
                 })
         pd.DataFrame(mrows).to_csv(m_tsv, sep="\t", index=False)
+        print(f"wrote {ta_perkb_svg}")
         print(f"wrote {occ_svg}")
         print(f"wrote {sec_svg}")
         print(f"wrote {bytype_svg}")

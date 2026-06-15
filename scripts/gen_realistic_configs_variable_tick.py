@@ -72,26 +72,54 @@ REFERENCE_MD_STEPS_PER_BLOCK = 5000
 RESTART_EVERY_BLOCKS = 5000
 COHESIN_LIFETIME_SECONDS = 25 * 60
 CTCF_LIFETIME_BOOST = 4
-RNAP_LOAD_RATE = 0.002          # ACTIVE LOCI: 2x Banigan k_load (0.001/s) -> ~2 Pol/gene.
-                                # A "more-active-than-typical" locus that stays close to
-                                # Banigan's published loading rate (was 0.005 = 5x, which gave
-                                # ~4 Pol/gene and over-large folds). Needs pause_offset>0 + cap.
+RNAP_LOAD_RATE = 0.0015         # EXPRESSED-gene loading anchor (geometric mean). Kept MODERATE so
+                                # the occupancy distribution stays quiet-majority (most genes <1
+                                # Pol). KEY (Zhao, Liu & Siepel 2023, NAR e106): realized
+                                # initiation is PAUSE-ESCAPE-limited (phi = alpha/(alpha+beta)),
+                                # NOT loading-limited -- raising load just piles Pol up via the long
+                                # residence (it does NOT speed up firing). Measured realized
+                                # initiation ~0.1-0.15/min sits at the LOW edge of Zhao's 0.1-1.5/min
+                                # band; to push ACTIVE genes toward Zhao's ~1/min you must SHORTEN
+                                # their pause (raise pause_release_prob), not raise load. load_prob
+                                # ~ pause_release_prob already encodes that coupling.
 RNAP_UNPAUSE_RATE = 0.002
+LOAD_LOGNORM_SIGMA = 1.3        # per-gene loading heterogeneity. Real gene expression is LOG-NORMAL
+                               # / Zipf and spans 3-4 ORDERS OF MAGNITUDE across genes (Furusawa;
+                               # transcriptome Zipf law): most genes low, a few hotspots. sigma~1.3
+                               # gives ~2-3 orders of spread (was 0.4 = only ~10x, unrealistically
+                               # narrow). load_prob ~ pause_release_prob (Gressel 2019 pause-init
+                               # limit) x TAD-size factor x lognormal(0, this); the EXPRESSED genes'
+                               # GEOMETRIC mean is held at RNAP_LOAD_RATE. 0 = uniform (legacy).
+# Silent-gene fraction: in any given cell, cell-type-specific and developmental genes are
+# largely OFF (~30-50% of genes silent genome-wide). Per-class P(silent); housekeeping always on.
+SILENT_PROB = {"hk_const": 0.0, "hk_high": 0.0, "celltype": 0.4, "dev": 0.7}
+LOAD_SILENT_FRAC = 0.03         # silent genes load at this x RNAP_LOAD_RATE (near-off, leaky only)
+# Pause-escape (beta) co-varies with activity (Zhao, Liu & Siepel 2023 NAR e106:
+# initiation is pause-escape-limited, phi=alpha/(alpha+beta); active mRNAs pause BRIEFLY).
+# The most active genes (top load tail) get a shortened pause so the promoter clears fast
+# and their REALIZED initiation reaches Zhao's ~0.2-1.5/min; quiet genes keep their long
+# (poised) pause. pause_release_prob is multiplied by 1..PAUSE_ACTIVE_BOOST across the upper
+# half of the activity rank, capped so pause >= PAUSE_MIN_S.
+PAUSE_ACTIVE_BOOST = 4.0        # gentled from 6.0: shortest active-gene pause ~1.5->2 min (less extreme)
+PAUSE_MIN_S = 60.0              # shortest pause (most-active genes); Zhao beta up to ~1-10/min
+LOAD_TADSIZE_EXPONENT = 0.2    # load_prob *= (median_TAD / this_TAD_size)**exp -> SHORTER TADs hold
+                               # MORE-active (higher-loading) genes; longer TADs less active
+                               # (A/B-compartment-like, reinforcing TAD_SIZE_TXN_WEIGHT). 0 = off.
 RNAP_UNBIND_RATE = 0.005677     # 3' termination/unbind -> 3' dwell ~3.0 min (180 s, term_prob
                                 # 0.044). Upper-middle of the 1-8 min band (Cortazar 2019 /
                                 # Fong 2015); keeps a terminating Pol parked at the TES so the
                                 # 0.980 3' wall bites (the convergent-island / 3'-barrier lever).
-RNAP_SPEED_KB_PER_SECOND = 0.03 # 0.03 kb/s = 1.8 kb/min (low-normal Pol II; band 1.3-4.3).
-                                # Slowed from 0.05 so cohesin (0.125 kb/s per leg) out-paces RNAP
-                                # by ~4.2x -> back inside Banigan's required 3-5x extrusion:RNAP
-                                # ratio (was 2.5x, which made RNAP an over-strong barrier).
+RNAP_SPEED_KB_PER_SECOND = 0.04 # 0.04 kb/s = 2.4 kb/min base (~2 kb/min realized after Pol-train
+                                # jamming) = the MEDIAN in-vivo Pol II rate (band 1.3-4.3; was
+                                # 0.03 = 1.5 low-edge). cohesin 0.125 kb/s per leg out-paces RNAP
+                                # by ~3.1x -> still inside Banigan's required 3-5x extrusion ratio.
 RNAP_BYPASS_SECONDS = 100.0     # active/paused Pol II barrier: cohesin bypass ~100 s (block
                                 # 0.923) = Banigan tbypass exactly (k_bypass ~0.01/s). A weakly-
                                 # permeable moving barrier; the ON/OFF effect at a highly-active
                                 # locus comes from dense Pol, NOT from over-strong per-Pol block.
-RNAP_TERM_BYPASS_SECONDS = 159.0   # TERMINATING Pol 3' barrier, mildly DECOUPLED above the active
-                                # block: bypass ~159 s (block 0.951). Banigan-adjacent; terminating
-                                # Pol is a somewhat stronger 3' barrier (stationary post-termination).
+RNAP_TERM_BYPASS_SECONDS = 100.0   # TERMINATING Pol 3' barrier = active block (bypass 100 s,
+                                # block 0.923) -- fully Banigan (single state-independent k_bypass).
+                                # Raise above 100 to re-decouple a stronger 3' wall if needed.
 RNAP_POISED_BYPASS_SECONDS = 12.0  # POISED (pre-initiation) Pol II is a LEAKY barrier:
                                 # cohesin bypasses ~8x faster than active Pol II (~0.5 block @ 8 s)
 # RNAPII<->cohesin interference (per-ENCOUNTER probabilities; tick-INDEPENDENT, so emitted
@@ -294,6 +322,7 @@ def _make_gene(rng, tss, tes, cls, calibration):
              # throttling re-loading to ~1 Pol/gene regardless of load_prob.
              pause_offset=1,
              termination_prob=_round_prob(calibration["rnap_termination_prob"], 4))
+    g["_cls"] = cls   # transient class tag for the activity post-pass (not emitted; see fmt_gene)
     return g, C
 
 
@@ -353,17 +382,18 @@ def gen_genes(rng, bounds, dens_per, txn_per, calibration):
         occ = np.zeros(span, bool); occ[:EDGE] = True; occ[-EDGE:] = True
         remaining = n
 
-        # --- boundary-flank promoters: housekeeping / Pol II density is high at
-        # TAD boundaries (Dixon 2012). Seed a compact hk promoter just inside each
-        # INTERNAL boundary, TSS proximal -> Pol II acts as a barrier reinforcing
-        # insulation. hk classes carry no enhancers, so NO cohesin loads here.
-        # Capped (<= n//2) so gene-rich TADs keep an interior population.
-        nflank = 0 if n <= 1 else (1 if n <= 3 else 2)
+        # --- boundary-flank promoter: TAD boundaries are MODESTLY enriched (~1.5-2.6x)
+        # for housekeeping genes / TSSs (Dixon 2012; stable-boundary studies), NOT
+        # saturated. So place at most ONE flank promoter per TAD, only probabilistically
+        # (FLANK_PROB), spread over a WIDE window (3-25 kb), and only ~70% housekeeping
+        # (boundaries are hk-ENRICHED, not hk-exclusive). The old rule pinned 1-2 hk
+        # promoters 3-8 kb inside EVERY boundary -> ~10x enrichment, far too strong.
+        # A TSS-bound Pol still reinforces insulation, just at realistic density.
+        FLANK_PROB = 0.5
         avail = [s for s in ("L", "R") if (lo > 0 if s == "L" else hi < CHAIN)]
-        if len(avail) == 2 and nflank == 1 and rng.random() < 0.5:
-            avail = avail[::-1]
-        for side in avail[:nflank]:
-            off = int(rng.integers(3, 9))       # promoter 3-8 sites into the flank
+        if avail and n > 2 and rng.random() < FLANK_PROB:
+            side = avail[int(rng.integers(len(avail)))]
+            off = int(rng.integers(3, 26))      # 3-25 kb into the flank (was 3-8: too tight a peak)
             L = min(gene_length(rng), max(3, span // 4))
             if side == "L":
                 s = off
@@ -371,13 +401,15 @@ def gen_genes(rng, bounds, dens_per, txn_per, calibration):
             else:
                 s = span - off - L
                 tss_pos, tes_pos, strand = hi - off, hi - off - L, False
-            if s < EDGE or s + L > span - EDGE or occ[s:s + L].any():
-                continue
-            occ[max(0, s - 5):s + L + 5] = True
-            cls = "hk_high" if rng.random() < (0.15 + 0.5 * t) else "hk_const"
-            g, C = _make_gene(rng, tss_pos, tes_pos, cls, calibration)
-            _add_enhancers(rng, g, C, lo, hi, strand)
-            genes.append(g); remaining -= 1
+            if EDGE <= s and s + L <= span - EDGE and not occ[s:s + L].any():
+                occ[max(0, s - 5):s + L + 5] = True
+                if rng.random() < 0.70:         # boundaries are hk-ENRICHED, not exclusive
+                    cls = "hk_high" if rng.random() < (0.15 + 0.5 * t) else "hk_const"
+                else:
+                    cls = ORDER[rng.choice(len(ORDER), p=fr)]
+                g, C = _make_gene(rng, tss_pos, tes_pos, cls, calibration)
+                _add_enhancers(rng, g, C, lo, hi, strand)
+                genes.append(g); remaining -= 1
 
         # --- interior genes (classes drawn by TAD activity), largest first so
         # long genes get space (avoids short-gene packing bias) ---
@@ -507,7 +539,7 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
   separation: {separation}
   lifetime: {lifetime}
   lifetime_stalled: {lifetime}
-  lifetime_ctcf: {life_ctcf}
+  lifetime_ctcf: {life_ctcf} # Cohesin lifetime when its captured by a CTCF site (boosted from the base lifetime)
   tick_seconds: {calibration["tick_seconds"]:g}
   warmup_steps: {calibration["warmup_steps"]}
   trajectory_length: {calibration["trajectory_length"]}
@@ -544,11 +576,11 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     rnapii_terminating_block_prob: {_round_prob(calibration["rnap_term_block_prob"], 3)}
     ep_contact_tolerance: 1
     replicate_genes_across_chains: true
-    targeted_load_prob: 0.02
+    targeted_load_prob: 0.0
     loading_window: 1
-    target_enhancers: true     # keep: enhancer/NIPBL loading (Kagey 2010; Fursova 2024)
-    target_tss: false          # Banigan 2023: no preferential TSS loading (artifact)
-    weight_loading_by_activity: true
+    target_enhancers: false
+    target_tss: false
+    weight_loading_by_activity: false
 {lesion_kwargs_block}
     genes:
 {gene_lines}
@@ -682,9 +714,9 @@ def main():
                     help="config4: per-tick prob a stalling lesion blocks a cohesin leg")
     ap.add_argument("--lesion-tad-size-exponent", type=float, default=1.0,
                     help="config4: placement weight L_TAD**(-alpha); larger -> shorter TADs carry more lesions")
-    ap.add_argument("--lesion-tad-repair-exponent", type=float, default=1.0,
+    ap.add_argument("--lesion-tad-repair-exponent", type=float, default=0.25,
                     help="config4: rate * (L_mean/L_TAD)**beta; larger -> shorter TADs recognise/repair faster")
-    ap.add_argument("--lesion-type-b-enabled", action=argparse.BooleanOptionalAction, default=False,
+    ap.add_argument("--lesion-type-b-enabled", action=argparse.BooleanOptionalAction, default=True,
                     help="config4: include Type-B (GG-NER) lesions. DEFAULT OFF -> only Type-A lesions "
                          "(the Type-A count is unchanged, no backfill). Pass --lesion-type-b-enabled to add Type-B.")
 
@@ -724,6 +756,44 @@ def main():
     drive = [BSTR_TXN_WEIGHT * t + (1.0 - BSTR_TXN_WEIGHT) * d for t, d in zip(tb, db)]
     bstrength = np.round(np.clip([lo_b + (hi_b - lo_b) * x + rng.normal(0, BSTR_NOISE) for x in drive], lo_b, hi_b), 2)
     genes, intervals = gen_genes(rng, bounds, dens, txn, calibration)
+    # Per-gene loading heterogeneity -> a realistic, heavy-tailed (log-normal / Zipf)
+    # ACTIVITY distribution: most genes quiet, a few hotspots, with a silent fraction.
+    #   (1) pause-initiation limit (Gressel et al. 2019): load ~ 1/pause = pause_release_prob;
+    #   (2) TAD compartmentalisation: shorter TADs hold more-active genes, load ~ (1/size)^exp;
+    #   (3) wide log-normal scatter (LOAD_LOGNORM_SIGMA ~1.3) -> 2-3 orders of magnitude spread;
+    #   (4) SILENT genes: cell-type-specific / developmental genes are largely OFF in a given
+    #       cell (SILENT_PROB per class) -> near-zero load.
+    # The EXPRESSED genes' GEOMETRIC mean (the typical active gene) is held at RNAP_LOAD_RATE.
+    if genes and LOAD_LOGNORM_SIGMA > 0:
+        cls = [g.pop("_cls", "") for g in genes]              # consume the transient class tag
+        prel = np.array([g["pause_release_prob"] for g in genes], dtype=float)
+        gpos = np.array([min(g["tss"], g["tes"]) for g in genes])
+        gsize = np.array([next((hi - lo for lo, hi in intervals if lo <= p < hi), np.nan)
+                          for p in gpos], dtype=float)
+        gsize[~np.isfinite(gsize)] = np.nanmedian(gsize)
+        size_factor = (np.median(gsize) / gsize) ** LOAD_TADSIZE_EXPONENT
+        raw = prel * size_factor * rng.lognormal(0.0, LOAD_LOGNORM_SIGMA, len(genes))
+        silent = np.array([rng.random() < SILENT_PROB.get(c, 0.0) for c in cls])
+        target = calibration["rnap_load_prob"]
+        expressed = ~silent
+        geo = np.exp(np.log(raw[expressed]).mean()) if expressed.any() else raw.mean()
+        loads = raw / geo * target                            # expressed geo-mean -> target
+        loads[silent] = LOAD_SILENT_FRAC * target             # silent genes near-off
+        loads = np.clip(loads, 1e-4, 0.10)                    # cap hotspots (0.10/tick ≈ 0.8 loads/min
+        #                                                       -> ~40-50 Pol on the most active genes;
+        #                                                       0.30 let a few genes pile up ~160 Pol)
+        # Pause-escape co-varies with activity (Zhao phi=alpha/(alpha+beta)): shorten the pause
+        # of the most active genes so their promoter clears fast and realized initiation rises
+        # into Zhao's 0.2-1.5/min band; quiet/typical genes keep their (long, poised) pause.
+        rank = (np.argsort(np.argsort(loads)) + 0.5) / len(loads)       # activity rank in (0,1)
+        boost = 1.0 + (PAUSE_ACTIVE_BOOST - 1.0) * np.clip((rank - 0.5) / 0.5, 0.0, 1.0)
+        prel_cap = _rate_to_prob(1.0 / PAUSE_MIN_S, calibration["tick_seconds"])  # shortest pause
+        for g, lp, b in zip(genes, loads, boost):
+            g["load_prob"] = _round_prob(float(lp), 5)
+            g["pause_release_prob"] = _round_prob(min(float(g["pause_release_prob"]) * b, prel_cap), 4)
+    else:
+        for g in genes:
+            g.pop("_cls", None)
     from pathlib import Path
     od = Path(args.out_dir)
     od.mkdir(parents=True, exist_ok=True)

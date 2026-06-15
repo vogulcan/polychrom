@@ -114,8 +114,8 @@ def parse_multipliers(text: str) -> list[float]:
 
 def multiplier_label(multiplier: float) -> str:
     if float(multiplier).is_integer():
-        return f"x{int(multiplier)}"
-    label = f"x{multiplier:g}"
+        return f"{int(multiplier)}x"
+    label = f"{multiplier:g}x"
     return re.sub(r"[^A-Za-z0-9_.-]+", "p", label)
 
 
@@ -136,7 +136,7 @@ def heatmap_tick_label(label: str, strength_summary: dict) -> str:
     sd = strength_summary["sd_boundary_strength_pct"]
     if not np.isfinite(mean) or not np.isfinite(sd):
         return f"{label}\nNA"
-    return f"{label}\n{mean:.1f} +- {sd:.1f}%"
+    return f"{label}\n{mean:.1f} ± {sd:.1f}%"
 
 
 def _uses_tads(base_cfg: dict) -> bool:
@@ -366,7 +366,7 @@ def plot_heatmaps(
             if not np.isfinite(value):
                 text = "NA"
             elif np.isfinite(sd):
-                text = f"{value:.2f}\n+-{sd:.2f}"
+                text = f"{value:.2f}\n±{sd:.2f}"
             else:
                 text = f"{value:.2f}"
             ax.text(col_idx, 0, text, ha="center", va="center", fontsize=11, color="#111111")
@@ -376,7 +376,7 @@ def plot_heatmaps(
         ax.set_xticks(range(len(labels)))
         if row_idx == nrows - 1:
             ax.set_xticklabels(display_labels, fontsize=12)
-            ax.set_xlabel("Boundary-strength multiplier, RNAP off (mean +- SD explicit boundary strength)", fontsize=10)
+            ax.set_xlabel("Boundary-strength multiplier, RNAP off (mean ± SD explicit boundary strength)", fontsize=10)
         else:
             ax.set_xticklabels([])
         ax.tick_params(axis="both", length=0)
@@ -534,7 +534,7 @@ def main() -> None:
         "baseline_h5": str(args.h5_config1),
         "multipliers": args.multipliers,
         "boundary_strength_policy": "explicit boundary_strength entries multiplied and capped at 1.0; default_boundary_strength unchanged",
-        "x_axis_boundary_strength_label": "multiplier plus mean +- sample SD of explicit capped boundary strengths, shown as percent",
+        "x_axis_boundary_strength_label": "multiplier plus mean ± sample SD of explicit capped boundary strengths, shown as percent",
         "rnap_policy": "generated configs set lef.max_rnapii=0 and rnapii_load/rnapii_translocate=null",
         "normalization": "mean raw per-chain metric in generated config divided by mean raw per-chain metric in config1",
         "statistical_test": STAT_TEST_NAME,

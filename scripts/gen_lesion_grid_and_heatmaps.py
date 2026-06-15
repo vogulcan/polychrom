@@ -541,6 +541,7 @@ def plot_heatmaps(
     center: float | None = 1.0,
     cmap=FOLD_CMAP,
     x_label: str = "Lesion density (lesions/Mbp)",
+    y_ticklabels: list[str] | None = None,
 ) -> None:
     """Grid of heatmaps, one per metric in ``grids``. Rows = ``y_values``
     (ascending), cols = density (lesions/Mbp, ascending).
@@ -553,7 +554,8 @@ def plot_heatmaps(
     nrows = int(np.ceil(len(metrics) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(5.2 * ncols, 4.4 * nrows), squeeze=False)
 
-    y_ticklabels = [("∞" if not np.isfinite(v) else y_fmt.format(v)) for v in y_values]
+    if y_ticklabels is None:
+        y_ticklabels = [("∞" if not np.isfinite(v) else y_fmt.format(v)) for v in y_values]
     x_ticklabels = [f"{d:.1f}" for d in density_axis]
 
     for idx, metric in enumerate(metrics):

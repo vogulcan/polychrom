@@ -220,85 +220,111 @@ def _spearman(a, b):
     return float(np.corrcoef(ar, br)[0, 1])
 
 
+_ON_C, _OFF_C, _DIFF_C = "#A63446", "#465775", "#3b8a5a"
+_ON_LAB, _OFF_LAB = "transcription ON (baseline)", "transcription OFF (control)"
+
+
+def _enrich_axis(ax, *, baseline=1.0):
+    """Common styling: a labelled 'genome average' reference line."""
+    ax.axhline(baseline, color="#999", lw=0.9, ls="--", zorder=1)
+    ax.tick_params(labelsize=9.5)
+
+
 def plot_metagene(x_tss, x_tes, xs_scaled, on, off, flank, out_path, *, title):
-    """TSS-anchored, TES-anchored, and body-scaled cohesin enrichment, ON vs OFF,
-    plus the ON-OFF difference -- the isolated transcription effect (Banigan)."""
+    """Publication figure: average cohesin enrichment around genes (a 'meta-gene'),
+    transcription ON vs OFF, plus the ON-OFF difference -- the cohesin redistribution
+    CAUSED by transcription (Banigan moving-barrier). Enrichment = cohesin-leg
+    occupancy / genome-mean, so 1.0 = genome average, >1 = cohesin enriched."""
     ncol = 4 if off is not None else 3
-    fig, axes = plt.subplots(1, ncol, figsize=(4.0 * ncol, 4.6))
+    fig, axes = plt.subplots(1, ncol, figsize=(4.6 * ncol, 5.1))
     d = np.arange(-flank, flank + 1)
 
-    ax = axes[0]
-    ax.plot(d, on["tss"], color="#A63446", lw=1.6, label="tx ON")
-    if off is not None:
-        ax.plot(d, off["tss"], color="#465775", lw=1.4, label="RNAPII OFF")
-    ax.axvline(0, color="#888", lw=0.8, ls="--"); ax.axhline(1, color="#bbb", lw=0.7)
-    ax.set_title("TSS-anchored (5')"); ax.set_xlabel("sites from TSS (oriented 5'->3')")
-    ax.set_ylabel("cohesin enrichment (/genome mean)"); ax.legend(fontsize=8)
+    def _line(ax, on_y, off_y):
+        ax.plot(d, on_y, color=_ON_C, lw=2.0, label=_ON_LAB)
+        if off is not None:
+            ax.plot(d, off_y, color=_OFF_C, lw=1.8, label=_OFF_LAB)
+        ax.axvline(0, color="#666", lw=1.0, ls=":")
+        _enrich_axis(ax); ax.margins(x=0)
 
-    ax = axes[1]
-    ax.plot(d, on["tes"], color="#A63446", lw=1.6, label="tx ON")
-    if off is not None:
-        ax.plot(d, off["tes"], color="#465775", lw=1.4, label="RNAPII OFF")
-    ax.axvline(0, color="#888", lw=0.8, ls="--"); ax.axhline(1, color="#bbb", lw=0.7)
-    ax.set_title("TES-anchored (3')"); ax.set_xlabel("sites from TES (oriented 5'->3')")
-    ax.legend(fontsize=8)
+    ax = axes[0]; _line(ax, on["tss"], off["tss"] if off is not None else None)
+    ax.set_title("Promoter (TSS-anchored)", fontsize=12.5)
+    ax.set_xlabel("distance from TSS (kb, oriented 5′→3′)", fontsize=10.5)
+    ax.set_ylabel("cohesin enrichment\n(× genome average)", fontsize=10.5)
+    ax.legend(fontsize=9.5, frameon=False, loc="upper right")
+
+    ax = axes[1]; _line(ax, on["tes"], off["tes"] if off is not None else None)
+    ax.set_title("Gene 3′ end (TES-anchored)", fontsize=12.5)
+    ax.set_xlabel("distance from TES (kb, oriented 5′→3′)", fontsize=10.5)
 
     ax = axes[2]
-    ax.plot(xs_scaled, on["scaled"], color="#A63446", lw=1.6, label="tx ON")
+    ax.plot(xs_scaled, on["scaled"], color=_ON_C, lw=2.0, label=_ON_LAB)
     if off is not None:
-        ax.plot(xs_scaled, off["scaled"], color="#465775", lw=1.4, label="RNAPII OFF")
+        ax.plot(xs_scaled, off["scaled"], color=_OFF_C, lw=1.8, label=_OFF_LAB)
+    ax.axvspan(0, 1, color="#000", alpha=0.05, lw=0)
     for xv in (0.0, 1.0):
-        ax.axvline(xv, color="#888", lw=0.8, ls="--")
-    ax.axhline(1, color="#bbb", lw=0.7)
-    ax.set_title("body-scaled metagene"); ax.set_xlabel("TSS(0) -> gene body -> TES(1)")
-    ax.legend(fontsize=8)
-    ax.text(0.0, ax.get_ylim()[1], " TSS", fontsize=7, va="top")
-    ax.text(1.0, ax.get_ylim()[1], "TES ", fontsize=7, va="top", ha="right")
+        ax.axvline(xv, color="#666", lw=1.0, ls=":")
+    _enrich_axis(ax); ax.margins(x=0)
+    ax.set_title("Whole gene (length-scaled)", fontsize=12.5)
+    ax.set_xlabel("TSS → gene body → TES", fontsize=10.5)
+    ax.set_xticks([0, 1]); ax.set_xticklabels(["TSS", "TES"], fontsize=10)
 
     if off is not None:
-        # ON - OFF = the cohesin redistribution CAUSED by transcription. A positive
-        # bump at/just inside the TSS is the moving-barrier accumulation (Banigan);
-        # a dip is RNAP-driven eviction of cohesin.
         ax = axes[3]
         diff = on["scaled"] - off["scaled"]
-        ax.plot(xs_scaled, diff, color="#3b8a5a", lw=1.7)
-        ax.fill_between(xs_scaled, 0, diff, where=diff > 0, color="#3b8a5a", alpha=0.25)
-        ax.fill_between(xs_scaled, 0, diff, where=diff < 0, color="#A63446", alpha=0.20)
+        ax.plot(xs_scaled, diff, color="#333", lw=1.6)
+        ax.fill_between(xs_scaled, 0, diff, where=diff > 0, color=_DIFF_C, alpha=0.35,
+                        label="cohesin ACCUMULATED by transcription")
+        ax.fill_between(xs_scaled, 0, diff, where=diff < 0, color=_ON_C, alpha=0.25,
+                        label="cohesin DEPLETED by transcription")
+        ax.axvspan(0, 1, color="#000", alpha=0.05, lw=0)
         for xv in (0.0, 1.0):
-            ax.axvline(xv, color="#888", lw=0.8, ls="--")
-        ax.axhline(0, color="#888", lw=0.8)
-        ax.set_title("ON - OFF (transcription effect)")
-        ax.set_xlabel("TSS(0) -> gene body -> TES(1)")
-        ax.set_ylabel("Δ cohesin enrichment")
+            ax.axvline(xv, color="#666", lw=1.0, ls=":")
+        ax.axhline(0, color="#999", lw=0.9, ls="--")
+        ax.margins(x=0); ax.tick_params(labelsize=9.5)
+        ax.set_title("Transcription effect (ON − OFF)", fontsize=12.5)
+        ax.set_xlabel("TSS → gene body → TES", fontsize=10.5)
+        ax.set_ylabel("Δ cohesin enrichment", fontsize=10.5)
+        ax.set_xticks([0, 1]); ax.set_xticklabels(["TSS", "TES"], fontsize=10)
+        ax.legend(fontsize=8.5, frameon=False, loc="best")
 
-    fig.suptitle(title, fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(out_path); plt.close(fig)
+    fig.suptitle(title, fontsize=14.5, y=1.0)
+    fig.text(0.5, 0.005, "cohesin enrichment = cohesin-leg occupancy ÷ genome-mean "
+             "(1.0 = genome average; dashed line). Curves averaged over all genes, oriented 5′→3′.",
+             ha="center", fontsize=9.5, style="italic", color="#555")
+    fig.tight_layout(rect=(0, 0.03, 1, 0.96))
+    fig.savefig(out_path, bbox_inches="tight"); plt.close(fig)
 
 
 def plot_activity(xs_scaled, active_prof, silent_prof, pol_occ, body_e, out_path, *,
                   title, pearson, spearman):
-    """Active vs silent metagene + per-gene cohesin enrichment vs Pol II activity."""
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 4.8))
-    a1.plot(xs_scaled, active_prof, color="#A63446", lw=1.8, label="most transcribed (top 1/3)")
-    a1.plot(xs_scaled, silent_prof, color="#1b6ca8", lw=1.6, label="least transcribed (bottom 1/3)")
+    """Publication figure: does cohesin accumulation scale with transcription?
+    (Banigan: it should.) Left -- cohesin meta-gene for the most- vs least-transcribed
+    genes. Right -- per-gene cohesin enrichment vs Pol II occupancy."""
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(13, 5.2))
+    a1.plot(xs_scaled, active_prof, color=_ON_C, lw=2.2, label="most-transcribed genes (top ⅓)")
+    a1.plot(xs_scaled, silent_prof, color=_OFF_C, lw=2.0, label="least-transcribed genes (bottom ⅓)")
+    a1.axvspan(0, 1, color="#000", alpha=0.05, lw=0)
     for xv in (0.0, 1.0):
-        a1.axvline(xv, color="#888", lw=0.8, ls="--")
-    a1.axhline(1, color="#bbb", lw=0.7)
-    a1.set_title("cohesin metagene by activity (tx ON)")
-    a1.set_xlabel("TSS(0) -> gene body -> TES(1)")
-    a1.set_ylabel("cohesin enrichment (/genome mean)"); a1.legend(fontsize=8)
+        a1.axvline(xv, color="#666", lw=1.0, ls=":")
+    _enrich_axis(a1); a1.margins(x=0)
+    a1.set_title("Cohesin accumulation by gene activity", fontsize=12.5)
+    a1.set_xlabel("TSS → gene body → TES", fontsize=10.5)
+    a1.set_ylabel("cohesin enrichment (× genome average)", fontsize=10.5)
+    a1.set_xticks([0, 1]); a1.set_xticklabels(["TSS", "TES"], fontsize=10)
+    a1.legend(fontsize=9.5, frameon=False)
 
     m = np.isfinite(pol_occ) & np.isfinite(body_e)
-    a2.scatter(pol_occ[m], body_e[m], s=10, alpha=0.5, color="#3b3b6b")
-    a2.axhline(1, color="#bbb", lw=0.7)
+    a2.scatter(pol_occ[m], body_e[m], s=14, alpha=0.45, color="#3b3b6b", edgecolor="none")
+    a2.axhline(1.0, color="#999", lw=0.9, ls="--")
     a2.set_xscale("log")
-    a2.set_title(f"cohesin vs activity  (Pearson r={pearson:.2f}, Spearman ρ={spearman:.2f})")
-    a2.set_xlabel("Pol II occupancy at gene (per tick)")
-    a2.set_ylabel("gene-body cohesin enrichment")
-    fig.suptitle(title, fontsize=13)
+    a2.set_title(f"Cohesin vs transcription per gene\n(Spearman ρ = {spearman:.2f}, "
+                 f"Pearson r = {pearson:.2f})", fontsize=12.5)
+    a2.set_xlabel("Pol II occupancy at the gene (polymerases, log scale)", fontsize=10.5)
+    a2.set_ylabel("gene-body cohesin enrichment\n(× genome average)", fontsize=10.5)
+    a2.tick_params(labelsize=9.5)
+    fig.suptitle(title, fontsize=14.5, y=1.0)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(out_path); plt.close(fig)
+    fig.savefig(out_path, bbox_inches="tight"); plt.close(fig)
 
 
 def _profiles(occ, genes, genome_mean, N, chain, *, flank, nbody, gene_mask=None):

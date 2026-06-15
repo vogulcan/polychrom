@@ -123,6 +123,127 @@ _BURST_KEYS = [
     "mean_burst_duration_s", "mean_interburst_s",
 ]
 
+# --- human-biology reference ranges -----------------------------------------
+# Accepted in-vivo mammalian ranges for the trackable observables, in the SAME
+# native units the metric is measured in (so the per-gene median compares
+# directly). `scale`/`unit` are display-only. `soft=True` marks activity-
+# dependent quantities with a deliberately wide band (plausibility, not a tight
+# law). Sources include Banigan et al. 2023 PNAS's own simulation values (the
+# model these configs are calibrated to) for direct cross-reference.
+HUMAN_RANGES: dict[str, dict] = {
+    "elongation_velocity_bp_s": dict(
+        lo=21.7, hi=71.7, scale=0.06, unit="kb/min", disp="1.3-4.3 kb/min", soft=False,
+        src="Jonkers2014/Fuchs2014/Veloso2014; Banigan vp=6.0"),
+    "mean_pause_dwell_s": dict(
+        lo=300.0, hi=720.0, scale=1 / 60, unit="min", disp="5-12 min", soft=False,
+        src="Jonkers2014 ~7min; Banigan 8.3min (kunpause 0.002/s)"),
+    "mean_terminating_dwell_s": dict(
+        lo=60.0, hi=480.0, scale=1 / 60, unit="min", disp="1-8 min", soft=False,
+        src="Cortazar2019/Fong2015; Banigan 8.3min (kunbind 0.002/s)"),
+    "mean_residence_s": dict(
+        lo=300.0, hi=2400.0, scale=1 / 60, unit="min", disp="5-40 min", soft=True,
+        src=">=30min avg gene (Shao&Zeitlinger; Maiuri2011)"),
+    "pol2_occupancy": dict(
+        lo=0.3, hi=10.0, scale=1.0, unit="Pol/gene", disp="~0.5-2 typ, <=10 active", soft=True,
+        src="bimodal 5' peak; Banigan sim ~2/gene"),
+    "pol2_density_per_kb": dict(
+        lo=0.005, hi=0.25, scale=1.0, unit="Pol/kb", disp="~0.005-0.25 Pol/kb", soft=True,
+        src="derived (occupancy / gene length)"),
+    "initiation_rate_per_min": dict(
+        lo=0.005, hi=1.0, scale=60.0, unit="/h", disp="~0.3-60 /h (bursty)", soft=True,
+        src="pause-init limit Gressel2017; Banigan kload 0.001/s=0.06/min"),
+    "pausing_index": dict(
+        lo=1.5, hi=50.0, scale=1.0, unit="", disp="~2-50 (paused genes)", soft=True,
+        src="Jonkers/Lis2014 [NOTE: 5kb window here, not the ~50bp pause]"),
+    # Derived (completion/initiation per gene); the model's known realism gap.
+    "productive_fraction": dict(
+        lo=0.05, hi=0.5, scale=1.0, unit="", disp="~0.1-0.2 (rest premat. terminate)", soft=False,
+        src="Steurer2018; STL-seq Zumer/Zeitlinger (model lacks premature term.)"),
+}
+
+
+def realism_report(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-gene median of each trackable metric vs its human-biology range.
+
+    Flags each as OK / LOW / HIGH (median inside / below / above the band) and
+    reports the fraction of genes inside the band. ``productive_fraction`` is
+    derived from the completion/initiation columns."""
+    rows = []
+    for key, r in HUMAN_RANGES.items():
+        if key == "productive_fraction":
+            init = pd.to_numeric(df.get("initiation_rate_per_min"), errors="coerce")
+            comp = pd.to_numeric(df.get("completion_rate_per_min"), errors="coerce")
+            s = (comp / init.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
+        elif key in df.columns:
+            s = pd.to_numeric(df[key], errors="coerce").dropna()
+        else:
+            continue
+        if s.empty:
+            continue
+        med = float(s.median())
+        frac_in = float(((s >= r["lo"]) & (s <= r["hi"])).mean())
+        flag = "OK" if r["lo"] <= med <= r["hi"] else ("LOW" if med < r["lo"] else "HIGH")
+        rows.append({
+            "metric": key, "median_native": med, "median_display": med * r["scale"],
+            "unit": r["unit"], "human_range": r["disp"], "flag": flag,
+            "frac_genes_in_range": frac_in, "activity_dependent": r["soft"], "source": r["src"],
+        })
+    return pd.DataFrame(rows)
+
+
+def print_realism_report(rr: pd.DataFrame) -> None:
+    """Pretty-print the realism table (a '*' marks activity-dependent soft bands)."""
+    glyph = {"OK": "OK  ✓", "LOW": "LOW ↓", "HIGH": "HIGH↑"}
+    print("\n=== human-biology range check (per-gene median; * = activity-dependent, wide band) ===")
+    print(f"  {'metric':26s} {'median':>16s}   {'human range':24s} {'flag':6s} {'in-rng':>6s}  source")
+    for _, r in rr.iterrows():
+        name = r["metric"] + ("*" if r["activity_dependent"] else "")
+        med = f"{r['median_display']:.3g} {r['unit']}".strip()
+        print(f"  {name:26s} {med:>16s}   {r['human_range']:24s} "
+              f"{glyph[r['flag']]:6s} {r['frac_genes_in_range']:>5.0%}  {r['source']}")
+    hard = rr[~rr["activity_dependent"]]
+    nok = int((hard["flag"] == "OK").sum())
+    print(f"  -> hard-range metrics in human range: {nok}/{len(hard)} "
+          f"({int((hard['flag']=='HIGH').sum())} high, {int((hard['flag']=='LOW').sum())} low); "
+          f"soft (activity-dependent) shown with *")
+
+
+def activity_report(df: pd.DataFrame) -> dict:
+    """Measure the per-gene transcriptional ACTIVITY distribution (the expression
+    heavy-tail), which the per-metric range check does NOT capture. A realistic
+    locus is mostly QUIET with a minority of active genes, spanning orders of
+    magnitude (log-normal / Zipf). Expressed-gene initiation should fall in the
+    human PRO-seq band 0.2-1.5/min (Zhao, Liu & Siepel 2023, NAR e106)."""
+    occ = pd.to_numeric(df["pol2_occupancy"], errors="coerce")
+    init = pd.to_numeric(df["initiation_rate_per_min"], errors="coerce")   # events/min
+    m = occ.notna()
+    occ, init = occ[m], init[m]
+    f = lambda mask: 100.0 * float(mask.mean())
+    silent = occ < 0.3; quiet = (occ >= 0.3) & (occ < 1.0)
+    mod = (occ >= 1.0) & (occ < 3.0); act = occ >= 3.0
+    nz = occ[occ > 1e-3]
+    spread = (np.percentile(nz, 95) / max(np.percentile(nz, 5), 1e-9)) if len(nz) > 5 else float("nan")
+    expr = occ >= 1.0
+    in_zhao = 100.0 * float(((init >= 0.2) & (init <= 1.5) & expr).sum()) / max(int(expr.sum()), 1)
+    med_expr_init = float(init[expr].median()) if expr.any() else float("nan")
+    print("\n=== transcriptional ACTIVITY distribution (expression heavy-tail) ===")
+    print(f"  Pol-occupancy classes: silent(<0.3)={f(silent):.0f}%  quiet(0.3-1)={f(quiet):.0f}%  "
+          f"moderate(1-3)={f(mod):.0f}%  active(>3)={f(act):.0f}%")
+    print(f"    (realistic: a QUIET majority + a small active tail -- log-normal / Zipf)")
+    print(f"  activity spread (occupancy p95/p5) = {spread:.0f}x   "
+          f"(realistic ~10-1000x; expression spans 3-4 orders genome-wide)")
+    print(f"  expressed-gene initiation: median {med_expr_init:.2f}/min; "
+          f"{in_zhao:.0f}% in Zhao 0.2-1.5/min band")
+    quiet_maj = (f(silent) + f(quiet)) >= 30.0
+    heavy_tail = (spread >= 10.0) if spread == spread else False
+    verdict = ("REALISTIC (quiet majority + heavy tail)" if (quiet_maj and heavy_tail)
+               else "CHECK: distribution too narrow/uniform" if not heavy_tail
+               else "CHECK: too few quiet genes (locus uniformly active)")
+    print(f"  -> activity distribution: {verdict}")
+    return {"silent_pct": f(silent), "quiet_pct": f(quiet), "moderate_pct": f(mod),
+            "active_pct": f(act), "spread_p95_p5": spread,
+            "expr_init_median_per_min": med_expr_init, "expr_in_zhao_band_pct": in_zhao}
+
 
 class _UidTrack:
     """Accumulated life of one polymerase (keyed by its stable uid)."""
@@ -416,73 +537,219 @@ def _aggregate(df: pd.DataFrame, *, n_alleles: int) -> dict:
     return agg
 
 
-def plot_per_gene(df: pd.DataFrame, out_path: Path, *, title: str) -> None:
-    """Six per-gene panels covering each metric family."""
-    labels = [str(g) for g in df["gene_id"]]
-    x = np.arange(len(df))
-    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+# Each panel: (metric column, descriptive title, x-axis label) — the band/scale come
+# from HUMAN_RANGES so every panel shades the realistic human range and is self-explaining.
+_DIST_PANELS = [
+    ("elongation_velocity_bp_s", "Elongation velocity\n(Pol II speed along the gene)", "kb / min", False),
+    ("mean_pause_dwell_s", "Promoter-proximal pause\n(time Pol II pauses near the TSS)", "minutes", False),
+    ("mean_terminating_dwell_s", "3′ termination dwell\n(time Pol II spends at the gene 3′ end)", "minutes", False),
+    ("initiation_rate_per_min", "Initiation rate\n(new Pol II loaded)", "events / h", False),
+    ("pol2_occupancy", "Pol II per gene\n(occupancy ≈ Pol II ChIP)", "polymerases / gene", True),
+    ("pausing_index", "Pausing index\n(promoter ÷ gene-body density)", "ratio", False),
+]
 
-    ax = axes[0, 0]
-    w = 0.4
-    ax.bar(x - w / 2, df["initiation_rate_per_min"], w, label="initiation", color="#465775")
-    ax.bar(x + w / 2, df["completion_rate_per_min"], w, label="completion (mRNA)", color="#A63446")
-    ax.set_title("Initiation vs completion rate"); ax.set_ylabel("events / min"); ax.legend(fontsize=8)
 
-    ax = axes[0, 1]
-    ax.bar(x, df["pol2_density_per_kb"], color="#1b6ca8")
-    ax.set_title("Pol II density"); ax.set_ylabel("Pol II / kb (per allele)")
+def _dist_panel(ax, vals, key, title, xlabel, logx):
+    """One distribution panel: histogram + shaded human range + median line."""
+    r = HUMAN_RANGES.get(key, {})
+    sc = r.get("scale", 1.0)
+    v = np.asarray(pd.to_numeric(vals, errors="coerce"), float) * sc
+    v = v[np.isfinite(v)]
+    if logx:
+        v = v[v > 0]
+        ax.set_xscale("log")
+        bins = np.logspace(np.log10(max(v.min(), 1e-3)), np.log10(v.max()), 28) if v.size else 12
+        vplot = v
+    else:
+        # clip a heavy tail to the 99th pct so a few outliers don't stretch the axis
+        hi_clip = np.percentile(v, 99) if v.size else 1.0
+        if r:
+            hi_clip = max(hi_clip, r["hi"] * sc * 1.15)        # always show the full human range
+        vplot = np.clip(v, None, hi_clip)
+        bins = np.linspace(min(v.min(), 0) if v.size else 0, hi_clip, 26)
+    ax.hist(vplot, bins=bins, color="#6f8fbf", edgecolor="white", linewidth=0.3, zorder=2)
+    if r:
+        lo, hi = r["lo"] * sc, r["hi"] * sc
+        ax.axvspan(lo, hi, color="#3b8a5a", alpha=0.15, lw=0, zorder=0, label="human range")
+    med = float(np.median(v)) if v.size else np.nan
+    ax.axvline(med, color="#A63446", lw=2.0, zorder=3)
+    left = med < (np.nanmean(ax.get_xlim()) if not logx else 10 ** np.mean(np.log10(ax.get_xlim())))
+    ax.annotate(f"median\n{med:.2g}", xy=(med, 0.97), xycoords=("data", "axes fraction"),
+                ha="left" if left else "right", va="top", fontsize=9, color="#A63446", fontweight="bold")
+    ax.set_title(title, fontsize=11.5, pad=5)
+    ax.set_xlabel(xlabel, fontsize=10)
+    ax.set_ylabel("number of genes", fontsize=9.5)
+    ax.tick_params(labelsize=9)
+    if r:
+        ax.text(0.5, -0.30, f"realistic: {lo:.2g}–{hi:.2g} {xlabel}", transform=ax.transAxes,
+                ha="center", va="top", fontsize=8.5, color="#3b6b46", style="italic")
 
-    ax = axes[0, 2]
-    ax.bar(x, df["elongation_velocity_bp_s"], color="#3b8a5a")
-    ax.set_title("Elongation velocity"); ax.set_ylabel("bp / s")
 
-    ax = axes[1, 0]
-    ax.bar(x, df["pausing_index"], color="#c77d18")
-    ax.axhline(1.0, color="#888", lw=0.8, ls="--")
-    ax.set_title("Pausing index (promoter / body)"); ax.set_ylabel("ratio")
+def plot_distributions(df: pd.DataFrame, out_path: Path, *, title: str) -> None:
+    """Publication figure: per-gene distributions of each transcription metric with
+    the realistic human-biology range shaded (green) and the median marked (red),
+    plus where Pol II spends its time and the activity (expression) distribution.
+    Each panel is self-contained: title says what it is, x-axis gives the unit, and
+    the green band shows the realistic range."""
+    fig, axes = plt.subplots(3, 3, figsize=(15.5, 13))
+    for ax, (key, ttl, xl, logx) in zip(axes.flat[:6], _DIST_PANELS):
+        _dist_panel(ax, df.get(key), key, ttl, xl, logx)
 
-    ax = axes[1, 1]
-    bottom = np.zeros(len(df))
-    palette = {"poised": "#c9d6df", "paused": "#f2c14e", "elongating": "#3b8a5a",
-               "stalled": "#A63446", "terminating": "#6b4e9e"}
-    for name, color in palette.items():
-        vals = df[f"frac_{name}"].to_numpy(dtype=float)
-        ax.bar(x, vals, bottom=bottom, color=color, label=name)
-        bottom += np.nan_to_num(vals)
-    ax.set_title("State-time fractions"); ax.set_ylabel("fraction of Pol-ticks")
-    ax.legend(fontsize=7, ncol=2)
+    # Panel 7: where Pol II spends its time (mean state-time fractions, one stacked bar).
+    ax = axes[2, 0]
+    palette = [("poised", "#c9d6df"), ("paused", "#f2c14e"), ("elongating", "#3b8a5a"),
+               ("stalled", "#A63446"), ("terminating", "#6b4e9e")]
+    left = 0.0
+    for name, color in palette:
+        frac = float(np.nanmean(pd.to_numeric(df.get(f"frac_{name}"), errors="coerce")))
+        ax.barh(0, frac, left=left, color=color, edgecolor="white")
+        if frac > 0.04:
+            ax.text(left + frac / 2, 0, f"{name}\n{frac*100:.0f}%", ha="center", va="center",
+                    fontsize=8.5, color="white" if name != "poised" else "#333")
+        left += frac
+    ax.set_xlim(0, 1); ax.set_ylim(-0.6, 0.6); ax.set_yticks([])
+    ax.set_title("Where Pol II spends its time\n(mean fraction per state)", fontsize=11.5, pad=5)
+    ax.set_xlabel("fraction of polymerase-time", fontsize=10); ax.tick_params(labelsize=9)
 
-    ax = axes[1, 2]
-    ax.bar(x, df["active_fraction"], color="#1b6ca8")
-    ax.set_title("Active fraction (burst occupancy)"); ax.set_ylabel("fraction of ticks")
+    # Panel 8: activity (expression) distribution across genes — quiet majority + active tail.
+    ax = axes[2, 1]
+    occ = pd.to_numeric(df.get("pol2_occupancy"), errors="coerce").dropna()
+    cats = [("silent\n<0.3", (occ < 0.3).mean(), "#c9d6df"),
+            ("quiet\n0.3–1", ((occ >= 0.3) & (occ < 1)).mean(), "#9ab0cc"),
+            ("moderate\n1–3", ((occ >= 1) & (occ < 3)).mean(), "#6f8fbf"),
+            ("active\n>3", (occ >= 3).mean(), "#A63446")]
+    ax.bar(range(4), [c[1] * 100 for c in cats], color=[c[2] for c in cats], edgecolor="white")
+    for i, c in enumerate(cats):
+        ax.text(i, c[1] * 100 + 1, f"{c[1]*100:.0f}%", ha="center", fontsize=9)
+    ax.set_xticks(range(4)); ax.set_xticklabels([c[0] for c in cats], fontsize=9)
+    ax.set_ylabel("% of genes", fontsize=9.5)
+    ax.set_title("Activity (expression) across genes\n(realistic: quiet majority + active tail)",
+                 fontsize=11.5, pad=5); ax.tick_params(labelsize=9)
 
-    for ax in axes.flat:
-        ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=7, rotation=90)
-        ax.set_xlabel("gene_id", fontsize=8)
-    fig.suptitle(title, fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    fig.savefig(out_path)
+    # Panel 9: plain-language summary.
+    ax = axes[2, 2]; ax.axis("off")
+    spread = (occ.quantile(0.95) / max(occ.quantile(0.05), 1e-6)) if len(occ) else float("nan")
+    lines = [
+        "How to read this figure",
+        "",
+        "• green band = realistic human range",
+        "• red line = median across genes",
+        "• distributions, not per-gene bars,",
+        "   because most genes are quiet and a",
+        "   few are highly active (log-normal).",
+        "",
+        f"genes measured: {len(df)}",
+        f"median Pol II / gene: {occ.median():.2f}",
+        f"activity spread (p95/p5): {spread:.0f}×",
+    ]
+    ax.text(0.02, 0.98, "\n".join(lines), transform=ax.transAxes, va="top", ha="left",
+            fontsize=10.5, family="monospace")
+
+    fig.suptitle(title, fontsize=15, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.97), h_pad=3.0)
+    fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
+# Genome-browser metric tracks: (column, label, unit, display scale, colour, log-y).
+# Heavy-tailed metrics (occupancy, pause, pausing index) use a LOG y-axis so a few
+# outliers don't squash the typical genes.
+_GENOME_TRACKS = [
+    ("pol2_occupancy", "Pol II / gene", "Pol", 1.0, "#465775", True),
+    ("initiation_rate_per_min", "initiation", "/min", 1.0, "#1b6ca8", False),
+    ("elongation_velocity_bp_s", "elongation", "kb/min", 0.06, "#3b8a5a", False),
+    ("mean_pause_dwell_s", "pause", "min", 1 / 60, "#c77d18", True),
+    ("pausing_index", "pausing index", "ratio", 1.0, "#6b4e9e", True),
+]
+
+
+def _draw_boundaries(ax, boundaries, *, label=False, top=False):
+    """Mark TAD boundaries as vertical dashed lines; optionally label them (kb)."""
+    for b in boundaries or []:
+        ax.axvline(b, color="#c0392b", lw=0.9, ls="--", alpha=0.55, zorder=1)
+    if label and top and boundaries and len(boundaries) <= 16:
+        for b in boundaries:
+            ax.annotate(f"{b}", xy=(b, 1.02), xycoords=("data", "axes fraction"),
+                        ha="center", va="bottom", fontsize=7.5, color="#c0392b")
+
+
+def plot_genome_tracks(df: pd.DataFrame, out_path: Path, *, title: str,
+                       boundaries=None, chain: int | None = None) -> None:
+    """Publication figure (genome-browser view): each transcription metric plotted
+    ALONG the genome coordinate -- one marker per gene at its TSS (alleles averaged) --
+    with the realistic human-range band shaded (green) and TAD boundaries marked
+    (red dashed). Shows WHERE active genes and metric outliers sit relative to TADs."""
+    g = df.copy()
+    g["pos"] = pd.to_numeric(g["chain_relative_tss"], errors="coerce")
+    agg = g.dropna(subset=["pos"]).groupby("pos").mean(numeric_only=True).reset_index().sort_values("pos")
+    pos = agg["pos"].to_numpy()
+    n = len(_GENOME_TRACKS)
+    fig, axes = plt.subplots(n, 1, figsize=(15, 1.9 * n + 0.8), sharex=True)
+    for ax, (key, lab, unit, sc, col, logy) in zip(axes, _GENOME_TRACKS):
+        if key not in agg.columns:
+            continue
+        y = pd.to_numeric(agg[key], errors="coerce").to_numpy() * sc
+        r = HUMAN_RANGES.get(key)
+        if r:
+            ax.axhspan(r["lo"] * sc, r["hi"] * sc, color="#3b8a5a", alpha=0.12, lw=0, zorder=0)
+        if logy:
+            yy = np.where(y > 0, y, np.nan)
+            ax.set_yscale("log")
+            base = np.nanmin(yy) if np.isfinite(yy).any() else 1.0
+            ax.vlines(pos, base, yy, color=col, lw=0.8, alpha=0.35, zorder=2)
+            ax.scatter(pos, yy, s=18, color=col, zorder=3, edgecolor="white", linewidth=0.3)
+            ax.set_ylabel(f"{lab}\n({unit}, log)", fontsize=10)
+        else:
+            ax.vlines(pos, 0, y, color=col, lw=1.0, alpha=0.5, zorder=2)
+            ax.scatter(pos, y, s=18, color=col, zorder=3, edgecolor="white", linewidth=0.3)
+            ax.set_ylim(bottom=0)
+            ax.set_ylabel(f"{lab}\n({unit})", fontsize=10)
+        _draw_boundaries(ax, boundaries)
+        ax.tick_params(labelsize=8.5); ax.margins(x=0.01)
+    _draw_boundaries(axes[0], boundaries, label=True, top=True)
+    axes[0].annotate("green = realistic human range   ·   red dashed = TAD boundary",
+                     xy=(0.99, 1.16), xycoords="axes fraction", ha="right", fontsize=9,
+                     style="italic", color="#555")
+    axes[-1].set_xlabel("genome coordinate (kb; all alleles folded onto one chain)", fontsize=11.5)
+    if chain:
+        axes[-1].set_xlim(0, chain)
+    fig.suptitle(title, fontsize=14.5, y=0.995)
+    fig.text(0.5, 0.004, "one point per gene at its TSS (alleles averaged); height = metric value",
+             ha="center", fontsize=9, style="italic", color="#555")
+    fig.tight_layout(rect=(0, 0.02, 1, 0.95))
+    fig.savefig(out_path, bbox_inches="tight"); plt.close(fig)
+
+
 def plot_tracks(chip: np.ndarray, nascent: np.ndarray, genes: np.ndarray,
-                chain: int, out_path: Path, *, title: str) -> None:
+                chain: int, out_path: Path, *, title: str, boundaries=None) -> None:
     """Pol II ChIP (all present) and nascent (engaged) per-site tracks, folded
-    across alleles onto one locus; gene bodies shaded."""
+    across alleles onto one locus; gene bodies shaded; TAD boundaries marked."""
     xs = np.arange(chain)
-    fig, (a1, a2) = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
-    a1.fill_between(xs, chip, color="#465775", lw=0); a1.set_ylabel("Pol II ChIP\n(per allele)")
-    a1.set_title("Pol II occupancy (all states)")
-    a2.fill_between(xs, nascent, color="#3b8a5a", lw=0); a2.set_ylabel("nascent RNA\n(engaged)")
-    a2.set_title("Nascent RNA signal (ELONGATING|STALLED)")
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(15, 7), sharex=True)
+    a1.fill_between(xs, chip, color="#465775", lw=0)
+    a1.set_ylabel("Pol II per site\n(per allele)", fontsize=10.5)
+    a1.set_title("Pol II occupancy  —  all polymerases (ChIP-seq analog)", fontsize=12, loc="left")
+    a2.fill_between(xs, nascent, color="#3b8a5a", lw=0)
+    a2.set_ylabel("nascent RNA per site\n(per allele)", fontsize=10.5)
+    a2.set_title("Nascent RNA  —  engaged (elongating + stalled) Pol II (GRO/PRO-seq analog)",
+                 fontsize=12, loc="left")
     for g in genes:
         lo, hi = sorted((int(g["tss"]) % chain, int(g["tes"]) % chain))
         for ax in (a1, a2):
-            ax.axvspan(lo, hi, color="#000000", alpha=0.05, lw=0)
-    a2.set_xlabel("locus position (sites, folded onto one chain)")
-    fig.suptitle(title, fontsize=13)
+            ax.axvspan(lo, hi, color="#000000", alpha=0.06, lw=0)
+    for ax in (a1, a2):
+        _draw_boundaries(ax, boundaries)
+    _draw_boundaries(a1, boundaries, label=True, top=True)
+    a2.set_xlabel("genome coordinate (kb; all alleles folded onto one chain)", fontsize=11)
+    for ax in (a1, a2):
+        ax.tick_params(labelsize=9)
+        ax.margins(x=0)
+    a1.annotate("grey = gene bodies · red dashed = TAD boundary · sharp 5′ peaks = promoter Pol II",
+                xy=(0.5, 1.20), xycoords="axes fraction", ha="center", fontsize=9,
+                style="italic", color="#555")
+    fig.suptitle(title, fontsize=14, y=0.99)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(out_path)
+    fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -537,17 +804,38 @@ def main() -> None:
         print(f"  {k:28s}: {agg[k]:.4g}")
     print(f"wrote {tsv}")
 
+    # Human-biology range check (the headline "are my transcription numbers realistic?").
+    rr = realism_report(df)
+    print_realism_report(rr)
+    act = activity_report(df)
+    realism_tsv = out_dir / "transcription_realism.tsv"
+    rr.to_csv(realism_tsv, sep="\t", index=False)
+    pd.DataFrame([act]).to_csv(out_dir / "transcription_activity.tsv", sep="\t", index=False)
+    print(f"wrote {realism_tsv} + transcription_activity.tsv")
+
     if not args.no_plot:
         with h5py.File(h5_path, "r") as h:
             chain = int(h.attrs["chain_length"])
+        # TAD boundaries (chain-relative) for the genome-coordinate plots. Internal
+        # boundaries appear as adjacent edge pairs (~1 kb apart); merge them and drop
+        # the chromosome ends so each boundary is one labelled line.
+        tads = lef.get("topology_kwargs", {}).get("tads", [])
+        raw_b = sorted({int(t["left"]) for t in tads} | {int(t["right"]) for t in tads})
+        boundaries: list[int] = []
+        for b in raw_b:
+            if 3 < b < chain - 3 and (not boundaries or b - boundaries[-1] > 5):
+                boundaries.append(b)
         sub = f"{args.config.name}, tick={tick_seconds:g}s"
         gene_svg = out_dir / "transcription_metrics.svg"
-        plot_per_gene(df, gene_svg, title=f"Per-gene transcription metrics\n{sub}")
+        plot_genome_tracks(df, gene_svg, title=f"Transcription metrics along the genome\n{sub}",
+                           boundaries=boundaries, chain=chain)
+        dist_svg = out_dir / "transcription_distributions.svg"
+        plot_distributions(df, dist_svg,
+                           title=f"Transcription metric distributions vs human ranges\n{sub}")
         track_svg = out_dir / "transcription_tracks.svg"
         plot_tracks(chip, nascent, genes, chain, track_svg,
-                    title=f"Pol II ChIP & nascent RNA tracks\n{sub}")
-        print(f"wrote {gene_svg}")
-        print(f"wrote {track_svg}")
+                    title=f"Pol II ChIP & nascent RNA tracks\n{sub}", boundaries=boundaries)
+        print(f"wrote {gene_svg}, {dist_svg}, {track_svg}")
 
 
 if __name__ == "__main__":
