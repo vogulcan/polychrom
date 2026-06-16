@@ -266,6 +266,7 @@ def summarize_sweep(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     baseline = per_chain[per_chain["config"] == label1]
     baseline_means = baseline.groupby("metric")["raw_value"].mean().to_dict()
+    baseline_medians = baseline.groupby("metric")["raw_value"].median().to_dict()
 
     summary_rows = []
     stats_rows = []
@@ -287,6 +288,20 @@ def summarize_sweep(
                 else float("nan")
             )
             fold_sd = comp_sd / baseline_mean if baseline_mean else float("nan")
+
+            # Median-across-replicates fold: median raw comparison chain value
+            # divided by the median raw baseline chain value. The spread is the
+            # median absolute deviation of comparison chains, expressed in the
+            # same baseline-median units so it is consistent with the fold above.
+            baseline_median = float(np.nanmedian(base_values)) if base_values.size else float("nan")
+            comp_median = float(np.nanmedian(comp_values)) if comp_values.size else float("nan")
+            fold_median = comp_median / baseline_median if baseline_median else float("nan")
+            comp_mad = (
+                float(np.nanmedian(np.abs(comp_values - comp_median)))
+                if int(np.isfinite(comp_values).sum()) > 1
+                else float("nan")
+            )
+            fold_median_mad = comp_mad / baseline_median if baseline_median else float("nan")
             p_value = _two_sample_permutation_pvalue(base_values, comp_values)
 
             summary_rows.append(
@@ -298,6 +313,10 @@ def summarize_sweep(
                     "comparison_mean_raw": comp_mean,
                     "fold_vs_config1_mean": fold,
                     "fold_vs_config1_sd": fold_sd,
+                    "baseline_median_raw": baseline_median,
+                    "comparison_median_raw": comp_median,
+                    "fold_vs_config1_median": fold_median,
+                    "fold_vs_config1_median_mad": fold_median_mad,
                     "n_config1": int(np.isfinite(base_values).sum()),
                     "n_comparison": int(np.isfinite(comp_values).sum()),
                 }
@@ -323,6 +342,10 @@ def summarize_sweep(
     per_chain["fold_vs_config1_mean"] = (
         per_chain["raw_value"] / per_chain["baseline_config1_mean"]
     )
+    per_chain["baseline_config1_median"] = per_chain["metric"].map(baseline_medians)
+    per_chain["fold_vs_config1_median"] = (
+        per_chain["raw_value"] / per_chain["baseline_config1_median"]
+    )
     return pd.DataFrame(summary_rows), pd.DataFrame(stats_rows)
 
 
@@ -341,6 +364,9 @@ def plot_heatmaps(
     labels: list[str],
     display_labels: list[str],
     out_path: Path,
+    value_col: str = "fold_vs_config1_mean",
+    spread_col: str = "fold_vs_config1_sd",
+    title: str = "RNAP-off boundary-strength sweep: fold change vs config1",
 ) -> None:
     nrows = len(METRIC_ORDER)
     fig, axes = plt.subplots(
@@ -357,8 +383,8 @@ def plot_heatmaps(
             .set_index("config")
             .reindex(labels)
         )
-        values = metric_summary["fold_vs_config1_mean"].to_numpy(dtype=float)[None, :]
-        sds = metric_summary["fold_vs_config1_sd"].to_numpy(dtype=float)[None, :]
+        values = metric_summary[value_col].to_numpy(dtype=float)[None, :]
+        sds = metric_summary[spread_col].to_numpy(dtype=float)[None, :]
         cmap = FOLD_CMAP.copy()
         cmap.set_bad("#f1f3f5")
         image = ax.imshow(values, aspect="auto", cmap=cmap, norm=_norm_for_row(values.ravel()))
@@ -385,7 +411,7 @@ def plot_heatmaps(
         cbar = fig.colorbar(image, ax=ax, fraction=0.018, pad=0.01)
         cbar.ax.tick_params(labelsize=9, length=2)
 
-    fig.suptitle("RNAP-off boundary-strength sweep: fold change vs config1", fontsize=12)
+    fig.suptitle(title, fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     # bbox_inches="tight" expands the saved canvas to include the now-larger axis
@@ -528,6 +554,17 @@ def main() -> None:
     svg_path = out_dir / "boundary_strength_sweep_heatmaps.svg"
     plot_heatmaps(summary, sweep_labels, sweep_display_labels, svg_path)
 
+    median_svg_path = out_dir / "boundary_strength_sweep_heatmaps_median.svg"
+    plot_heatmaps(
+        summary,
+        sweep_labels,
+        sweep_display_labels,
+        median_svg_path,
+        value_col="fold_vs_config1_median",
+        spread_col="fold_vs_config1_median_mad",
+        title="RNAP-off boundary-strength sweep: median fold change vs config1",
+    )
+
     method = {
         "baseline_label": args.label1,
         "baseline_config": str(args.config1),
@@ -537,6 +574,7 @@ def main() -> None:
         "x_axis_boundary_strength_label": "multiplier plus mean ± sample SD of explicit capped boundary strengths, shown as percent",
         "rnap_policy": "generated configs set lef.max_rnapii=0 and rnapii_load/rnapii_translocate=null",
         "normalization": "mean raw per-chain metric in generated config divided by mean raw per-chain metric in config1",
+        "median_normalization": "median raw per-chain metric in generated config divided by median raw per-chain metric in config1 (boundary_strength_sweep_heatmaps_median.svg); spread annotation is the comparison-chain median absolute deviation in baseline-median units",
         "statistical_test": STAT_TEST_NAME,
         "metric_order": METRIC_ORDER,
         "generated": {
@@ -547,6 +585,7 @@ def main() -> None:
     (out_dir / "method.json").write_text(json.dumps(method, indent=2))
 
     print(f"wrote {svg_path}")
+    print(f"wrote {median_svg_path}")
     print(f"wrote {out_dir / 'sweep_summary.tsv'}")
     print(f"wrote {out_dir / 'sweep_per_chain_metrics.tsv'}")
     print(f"wrote {out_dir / 'sweep_stats.tsv'}")

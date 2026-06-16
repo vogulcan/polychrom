@@ -21,4 +21,6 @@ trajectory
 configs_test
 runs_test
 results
-results_old
+results_10k
+results_10k_2
+results_10k_3

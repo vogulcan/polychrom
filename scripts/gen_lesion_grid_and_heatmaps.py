@@ -538,6 +538,8 @@ def plot_heatmaps(
     value_label: str,
     y_fmt: str = "{:.3f}",
     cell_fmt: str = "{:.2f}",
+    cell_text: "Callable[[float], str] | None" = None,
+    cell_fontsize: float = 6.0,
     center: float | None = 1.0,
     cmap=FOLD_CMAP,
     x_label: str = "Lesion density (lesions/Mbp)",
@@ -548,7 +550,13 @@ def plot_heatmaps(
 
     ``center`` selects the colour scale: a float centres a diverging map there
     (e.g. fold = 1.0); ``None`` uses a plain sequential scale spanning the data
-    (for standalone measured quantities that have no natural midpoint)."""
+    (for standalone measured quantities that have no natural midpoint).
+
+    ``cell_text`` overrides only the in-cell annotation text: a callable mapping a
+    finite cell value to its display string (non-finite cells still show "n/a").
+    The colour scale is unaffected, so two heatmaps of the same grid differing only
+    in ``cell_text`` look identical apart from the printed numbers. When ``None``
+    the text is ``cell_fmt.format(value)``."""
     metrics = [m for m in labels if m in grids]
     ncols = min(3, max(1, len(metrics)))
     nrows = int(np.ceil(len(metrics) / ncols))
@@ -583,8 +591,13 @@ def plot_heatmaps(
         for r in range(grid.shape[0]):
             for c in range(grid.shape[1]):
                 v = grid[r, c]
-                txt = "n/a" if not np.isfinite(v) else cell_fmt.format(v)
-                ax.text(c, r, txt, ha="center", va="center", fontsize=6.0, color="#111111")
+                if not np.isfinite(v):
+                    txt = "n/a"
+                elif cell_text is not None:
+                    txt = cell_text(v)
+                else:
+                    txt = cell_fmt.format(v)
+                ax.text(c, r, txt, ha="center", va="center", fontsize=cell_fontsize, color="#111111")
 
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         cb.set_label(value_label, fontsize=8)

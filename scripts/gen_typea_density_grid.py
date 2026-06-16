@@ -376,22 +376,13 @@ def main() -> None:
                 _record(task, res["h5"])
 
     # 3) outputs ----------------------------------------------------------
+    # Y axis labels the row's Type A probability only; the measured per-row
+    # Type-A/kb burden has its own dedicated panel below.
     y_label = "Lesion Type A probability"
     y_fmt = "{:.2f}"
+    y_ticklabels = None
     sub = (f"STATIC block_prob={block_prob:g}, RNAPII off, "
            f"boundaries x{args.bstr_mult:g} (cap 1.0), tick={tick_seconds:g}s")
-
-    # Dual y-tick labels: the row's P(A) plus the per-row MEAN measured Type-A
-    # lesions per kb of gene body (averaged over that row's densities, from the
-    # trajectory). The exact per-cell values live in the dedicated panel below.
-    y_ticklabels = None
-    if not args.no_measure and gb_kb > 0:
-        row_mean = np.nanmean(measured[TYPEA_PERKB_KEY], axis=1)
-        y_ticklabels = [
-            f"{('∞' if not np.isfinite(v) else y_fmt.format(v))}\n({m:.4f}/kb)"
-            for v, m in zip(ta_sorted, row_mean)
-        ]
-        y_label = y_label + "\n(2nd line: mean measured Type-A / kb gene body)"
 
     fold_svg = out_dir / "ta_density_heatmaps.svg"
     plot_heatmaps(
@@ -432,7 +423,29 @@ def main() -> None:
             out_path=ta_perkb_svg,
             title=(f"Measured Type-A lesion burden inside gene bodies (from trajectory)\n"
                    f"gene-body length={gb_kb} kb; {sub}"),
-            value_label="Type-A lesions / kb gene body", cell_fmt="{:.4f}", center=None, cmap=SEQ_CMAP,
+            value_label="Type-A lesions / kb gene body", cell_fmt="{:.4f}", cell_fontsize=4.5,
+            center=None, cmap=SEQ_CMAP,
+        )
+        # Same grid/colour scale as above, but annotate each cell as a spacing
+        # ("1 lesion per X kb of gene body") -- the reciprocal of the per-kb density.
+        # Cells with zero/non-finite density have no finite spacing -> "n/a".
+        ta_perkb_inv_svg = out_dir / "ta_density_typea_one_per_kb_genebody.svg"
+
+        def _one_per_kb(v: float) -> str:
+            if v <= 0:
+                return "n/a"
+            x = 1.0 / v
+            return f"1 per {x:.0f} kb" if x >= 10 else f"1 per {x:.1f} kb"
+
+        plot_heatmaps(
+            measured, TYPEA_PERKB_LABELS,
+            y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
+            y_ticklabels=y_ticklabels,
+            out_path=ta_perkb_inv_svg,
+            title=(f"Measured Type-A lesion burden inside gene bodies (from trajectory)\n"
+                   f"gene-body length={gb_kb} kb; {sub}"),
+            value_label="Type-A lesions / kb gene body", cell_text=_one_per_kb, cell_fontsize=4.0,
+            center=None, cmap=SEQ_CMAP,
         )
         occ_svg = out_dir / "ta_density_measured_stall.svg"
         plot_heatmaps(
@@ -441,7 +454,8 @@ def main() -> None:
             y_ticklabels=y_ticklabels,
             out_path=occ_svg,
             title=f"Measured per-lesion cohesin stall occupancy (from trajectory)\n{sub}",
-            value_label="stalled cohesin legs per lesion", cell_fmt="{:.3f}", center=None, cmap=SEQ_CMAP,
+            value_label="stalled cohesin legs per lesion", cell_fmt="{:.3f}", cell_fontsize=4.5,
+            center=None, cmap=SEQ_CMAP,
         )
         sec_svg = out_dir / "ta_density_measured_stall_seconds.svg"
         plot_heatmaps(
@@ -484,6 +498,7 @@ def main() -> None:
                 })
         pd.DataFrame(mrows).to_csv(m_tsv, sep="\t", index=False)
         print(f"wrote {ta_perkb_svg}")
+        print(f"wrote {ta_perkb_inv_svg}")
         print(f"wrote {occ_svg}")
         print(f"wrote {sec_svg}")
         print(f"wrote {bytype_svg}")
