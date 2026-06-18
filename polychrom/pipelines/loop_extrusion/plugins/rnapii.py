@@ -5,7 +5,7 @@ Two translocate plugins live here:
 * :func:`translocate_rnapii` — single-state RNAPII that walks at a fixed
   integer ``rnapii_stride`` per tick (v1, kept for backwards compatibility).
 * :func:`stateful_translocate_rnapii` — three-state biological model
-  (POISED -> PAUSED -> ELONGATING) with per-state stochastic step
+  (PRE-INITIATION -> PAUSED -> ELONGATING) with per-state stochastic step
   probability and optional enhancer-dependent pause release. The 1D
   enhancer-promoter contact is detected by :func:`compute_ep_contacts`
   using a cohesin-loop-containment proxy.
@@ -19,7 +19,7 @@ Lattice encoding (``occupied``)::
 RNAPII state codes (stored in ``RNAPII.attrs["state"]`` and the optional
 ``rnapii_states`` HDF5 dataset)::
 
-    0 = POISED       (bound at TSS, not yet initiated)
+    0 = PRE-INITIATION       (bound at TSS, not yet initiated)
     1 = PAUSED       (initiated, promoter-proximal pause)
     2 = ELONGATING   (productive elongation)
     3 = TERMINATING  (reached TES, dwelling there before unloading)
@@ -27,7 +27,7 @@ RNAPII state codes (stored in ``RNAPII.attrs["state"]`` and the optional
                       this tick -- cohesin / traffic / lesion; NOT promoter-
                       proximal pause and NOT productive elongation)
 
-POISED, PAUSED, STALLED and TERMINATING Pol II are stationary blocks to
+PRE-INITIATION, PAUSED, STALLED and TERMINATING Pol II are stationary blocks to
 cohesin; only ELONGATING Pol II can push it (Fursova & Larson 2024, Fig 3a).
 """
 
@@ -44,7 +44,7 @@ FREE = 0
 COHESIN = 1
 RNAPII_CELL = 2
 
-STATE_POISED = 0
+STATE_PRE_INITIATION = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
 STATE_TERMINATING = 3
@@ -89,7 +89,7 @@ class Gene:
     enhancer_synergy: float = 1.5           # exponent used iff logic == "synergistic"
     requires_enhancer: bool = False
     load_requires_enhancer: bool = False    # recruitment also requires E-P contact
-    initiation_prob: float = 1.0            # POISED -> PAUSED per tick
+    initiation_prob: float = 1.0            # PRE-INITIATION -> PAUSED per tick
     pause_release_prob: float = 1.0         # PAUSED  -> ELONGATING per tick
     elongation_step_prob: float = 1.0       # per-tick step prob during ELONGATING
     pause_offset: int = 0                   # PAUSED site = TSS + direction*pause_offset
@@ -191,7 +191,7 @@ def compute_ep_contacts(
     An enhancer is "in contact" with its promoter (TSS) when at least one
     cohesin loop interval brackets the (TSS, enhancer) pair within ``tolerance``
     sites. The tolerance compensates for cohesin legs that cannot sit exactly at
-    the TSS when a POISED/PAUSED RNAPII occupies that site -- the loop still
+    the TSS when a PRE-INITIATION/PAUSED RNAPII occupies that site -- the loop still
     topologically encloses the EP pair when its endpoints are one or two sites
     off the EP coordinates.
 
@@ -264,7 +264,7 @@ def enhancer_factor(gene: Gene, n_contacts: int) -> float:
 def load_rnapii(rnapiis: List[RNAPII], occupied: np.ndarray, args: Dict) -> None:
     """For each gene, stochastically spawn a new RNAPII at its TSS.
 
-    New RNAPIIs start in the POISED state.
+    New RNAPIIs start in the PRE-INITIATION state.
     """
     genes: List[Gene] = args["genes"]
     rnapii_by_pos: Dict[int, RNAPII] = args["rnapii_by_pos"]
@@ -283,7 +283,7 @@ def load_rnapii(rnapiis: List[RNAPII], occupied: np.ndarray, args: Dict) -> None
         uid = int(args.get("_rnapii_uid_next", 0))
         args["_rnapii_uid_next"] = uid + 1
         r = RNAPII(pos=gene.tss, gene_id=gene.gene_id, direction=gene.direction, uid=uid)
-        r.attrs["state"] = STATE_POISED
+        r.attrs["state"] = STATE_PRE_INITIATION
         occupied[gene.tss] = RNAPII_CELL
         rnapii_by_pos[gene.tss] = r
         rnapiis.append(r)
@@ -298,7 +298,7 @@ def _resolve_head_on(r: "RNAPII", leg, args: Dict) -> str:
     Biology (Fursova & Larson, *Curr. Opin. Struct. Biol.* 2024, Fig. 3a):
 
     * Only ELONGATING RNAPII translocates productively, so only it can
-      push a cohesin. POISED / PAUSED RNAPII is a stationary block and
+      push a cohesin. PRE-INITIATION / PAUSED RNAPII is a stationary block and
       always stalls on contact -- it never displaces cohesin.
     * An elongating RNAPII pushes a *co-directional* cohesin leg (rear
       encounter) far more readily than a *head-on* (converging) leg, which
@@ -474,7 +474,7 @@ def translocate_rnapii(
 
 
 # ---------------------------------------------------------------------------
-# v2: biological state machine (POISED / PAUSED / ELONGATING)
+# v2: biological state machine (PRE-INITIATION / PAUSED / ELONGATING)
 # ---------------------------------------------------------------------------
 
 def stateful_translocate_rnapii(
@@ -483,7 +483,7 @@ def stateful_translocate_rnapii(
     occupied: np.ndarray,
     args: Dict,
 ) -> None:
-    """v2 RNAPII dynamics with POISED/PAUSED/ELONGATING/TERMINATING states.
+    """v2 RNAPII dynamics with PRE-INITIATION/PAUSED/ELONGATING/TERMINATING states.
 
     Per tick (per RNAPII):
 
@@ -491,7 +491,7 @@ def stateful_translocate_rnapii(
       (Fursova & Larson 2024, Fig 3a: terminating Pol II blocks cohesin,
       giving TES accumulation). Unload with probability
       ``gene.termination_prob`` (``1.0`` = old one-tick behaviour).
-    * **POISED**: with probability ``gene.initiation_prob`` transition to
+    * **PRE-INITIATION**: with probability ``gene.initiation_prob`` transition to
       PAUSED; if ``gene.pause_offset > 0`` and the pause site is free,
       hop there. Otherwise PAUSE in place.
     * **PAUSED**: if the gene requires enhancer contact and the gene is
@@ -545,9 +545,9 @@ def stateful_translocate_rnapii(
                 del rnapiis[idx]
             continue
 
-        state = r.attrs.get("state", STATE_POISED)
+        state = r.attrs.get("state", STATE_PRE_INITIATION)
 
-        if state == STATE_POISED:
+        if state == STATE_PRE_INITIATION:
             if np.random.random() < gene.initiation_prob:
                 # Hop up to pause_offset sites toward the pause site; stop early
                 # if blocked. pause_offset is a distance, not a flag.

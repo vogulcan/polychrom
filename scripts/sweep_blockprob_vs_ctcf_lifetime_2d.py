@@ -8,8 +8,8 @@ metric:
 * **y axis - RNAPII-cohesin block probability (active trio).** A single absolute
   probability is applied jointly to ``lef.topology_kwargs.rnapii_paused_block_prob``,
   ``rnapii_elongating_block_prob`` and ``rnapii_terminating_block_prob`` (the
-  "strong" barriers, baseline 0.923 each). The poised barrier
-  (``rnapii_poised_block_prob``, baseline 0.513) is left fixed at its baseline
+  "strong" barriers, baseline 0.923 each). The pre-initiation barrier
+  (``rnapii_pre_initiation_block_prob``, baseline 0.513) is left fixed at its baseline
   value. Each value is the probability that cohesin is blocked when it meets a
   paused/elongating/terminating Pol II.
 * **x axis - ``lef.lifetime_ctcf``** (the WAPL-protected lifetime of cohesin
@@ -213,7 +213,7 @@ def make_grid_config(
 
     ``block_prob`` is assigned (as an absolute probability) to the three active
     RNAPII barrier states together; ``ctcf_mult`` scales the CTCF-capture
-    lifetime. The poised block prob, the cohesin lifetimes and all RNAP settings
+    lifetime. The pre-initiation block prob, the cohesin lifetimes and all RNAP settings
     are left exactly as in the baseline config.
     """
     cfg = copy.deepcopy(base_cfg)
@@ -233,7 +233,7 @@ def make_grid_config(
         "rnapii_paused_block_prob": block_prob,
         "rnapii_elongating_block_prob": block_prob,
         "rnapii_terminating_block_prob": block_prob,
-        "rnapii_poised_block_prob": kwargs.get("rnapii_poised_block_prob"),
+        "rnapii_pre_initiation_block_prob": kwargs.get("rnapii_pre_initiation_block_prob"),
     }
     return cfg, record
 
@@ -437,7 +437,7 @@ def main() -> None:
         f"{base_blocks['rnapii_paused_block_prob']:g}/"
         f"{base_blocks['rnapii_elongating_block_prob']:g}/"
         f"{base_blocks['rnapii_terminating_block_prob']:g}; "
-        f"poised (fixed) = {base_cfg['lef'].get('topology_kwargs', {}).get('rnapii_poised_block_prob')}; "
+        f"pre-initiation (fixed) = {base_cfg['lef'].get('topology_kwargs', {}).get('rnapii_pre_initiation_block_prob')}; "
         f"lifetime_ctcf = {int(base_ctcf)}"
     )
 
@@ -588,9 +588,9 @@ def main() -> None:
                 "applies_to": list(TRIO_KEYS),
                 "base_values": base_blocks,
                 "fixed": {
-                    "rnapii_poised_block_prob": base_cfg["lef"]
+                    "rnapii_pre_initiation_block_prob": base_cfg["lef"]
                     .get("topology_kwargs", {})
-                    .get("rnapii_poised_block_prob")
+                    .get("rnapii_pre_initiation_block_prob")
                 },
                 "seconds_per_step": args.seconds_per_step,
                 "dwell_seconds_formula": "p/(1-p)*seconds_per_step (effective RNAPII dwell; p=1 -> inf)",
@@ -605,7 +605,7 @@ def main() -> None:
                 "base_value": base_ctcf,
             },
         },
-        "block_prob_policy": "absolute probability assigned jointly to the three active RNAPII barrier states; poised left at baseline",
+        "block_prob_policy": "absolute probability assigned jointly to the three active RNAPII barrier states; pre-initiation left at baseline",
         "ctcf_lifetime_policy": "lifetime_ctcf = round(base_lifetime_ctcf * multiplier) in int steps",
         "rnap_policy": "baseline RNAP settings left unchanged (NOT forced off) so the block-prob axis is meaningful",
         "normalization": "mean raw per-chain metric in grid config divided by mean raw per-chain metric in config1",

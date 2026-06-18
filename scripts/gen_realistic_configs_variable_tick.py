@@ -32,20 +32,20 @@ COHESIN:
     CTCF-stalled lifetime is 4x the base lifetime.
   * CTCF capture strengths are centered near the Gabriele best fit
     pstall = 1/8 with boost b = 4; config3 strengthens these further.
-  * loading ~98% uniform (targeted_load_prob 0.02). target_tss FALSE (Banigan 2023:
-    no preferential TSS loading); target_enhancers TRUE (Kagey 2010 / Fursova 2024).
-    cohesin@genes is barrier-driven (RNAPII pinning, Busslinger 2017), not loading.
+  * loading uniform (targeted_load_prob 0.0). target_tss FALSE and target_enhancers
+    FALSE (Banigan 2023: no preferential TSS/enhancer loading); cohesin@genes is
+    barrier-driven (RNAPII pinning, Busslinger 2017), not loading.
 
 RNAPII (per gene): Banigan et al. PNAS 2023 moving-barrier rates are converted
   to the requested tick using p = 1-exp(-k*t). Realistic kinetics: elongation
-  0.05 kb/s = 3 kb/min (real Pol II ~2-4 kb/min) via integer ``rnapii_stride`` x a
+  0.04 kb/s = 2.4 kb/min (real Pol II ~2-4 kb/min) via integer ``rnapii_stride`` x a
   per-substep probability; pause release minutes (per class, ~5-8 min); 3'
-  termination/unbind ~0.01/s -> ~100 s 3' dwell (longer dwells let terminating Pol
-  dominate the state budget). Promoter loading ~0.001/s (Banigan k_load).
+  termination/unbind ~0.0057/s -> ~3 min (180 s) 3' dwell (longer dwells let terminating
+  Pol dominate the state budget). Promoter loading ~0.0015/s (Banigan k_load).
 
 INTERFERENCE (parameter_plan.md Group C; Banigan PNAS 2023): RNAP is a permeable
   moving barrier. Per-tick cohesin bypass of an ACTIVE Pol II barrier uses
-  tbypass~100 s -> block_prob=exp(-tick/100); POISED pre-initiation Pol II is
+  tbypass~100 s -> block_prob=exp(-tick/100); pre-initiation Pol II is
   leaky (bypassed ~8x faster). Per-ENCOUNTER (tick-independent): elongating RNAP
   wins head-on and pushes the converging cohesin (headon_push 0.85), co-directional
   contact mostly only slows it (push 0.20), with an intrinsic stall floor 0.15
@@ -120,7 +120,7 @@ RNAP_BYPASS_SECONDS = 100.0     # active/paused Pol II barrier: cohesin bypass ~
 RNAP_TERM_BYPASS_SECONDS = 100.0   # TERMINATING Pol 3' barrier = active block (bypass 100 s,
                                 # block 0.923) -- fully Banigan (single state-independent k_bypass).
                                 # Raise above 100 to re-decouple a stronger 3' wall if needed.
-RNAP_POISED_BYPASS_SECONDS = 12.0  # POISED (pre-initiation) Pol II is a LEAKY barrier:
+RNAP_PRE_INITIATION_BYPASS_SECONDS = 12.0  # pre-initiation Pol II is a LEAKY barrier:
                                 # cohesin bypasses ~8x faster than active Pol II (~0.5 block @ 8 s)
 # RNAPII<->cohesin interference (per-ENCOUNTER probabilities; tick-INDEPENDENT, so emitted
 # as flat values). Banigan PNAS 2023 moving barrier (parameter_plan.md Group C): elongating
@@ -246,7 +246,7 @@ def make_calibration(tick_seconds: float, trajectory_length=None, warmup_steps=N
         "rnap_termination_prob": _rate_to_prob(RNAP_UNBIND_RATE, tick_seconds),
         "rnap_block_prob": math.exp(-tick_seconds / RNAP_BYPASS_SECONDS),
         "rnap_term_block_prob": math.exp(-tick_seconds / RNAP_TERM_BYPASS_SECONDS),
-        "rnap_poised_block_prob": math.exp(-tick_seconds / RNAP_POISED_BYPASS_SECONDS),
+        "rnap_pre_initiation_block_prob": math.exp(-tick_seconds / RNAP_PRE_INITIATION_BYPASS_SECONDS),
         "class_ranges": {
             cls: {
                 "init": _scale_ref_range(spec["init"], tick_seconds),
@@ -568,9 +568,9 @@ def build(txn_on, bounds, bstrength, genes, calibration, num_chains=4, separatio
     rnapii_pause_cohesin_restraint: {RNAP_PAUSE_RESTRAINT}
     rnapii_pause_restraint_window: 1
     # Per-tick cohesin bypass of a Pol II barrier (tbypass ~100 s -> k ~0.01/s, Banigan).
-    # POISED pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
+    # pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
     # paused / elongating / terminating Pol II are strong barriers.
-    rnapii_poised_block_prob: {_round_prob(calibration["rnap_poised_block_prob"], 3)}
+    rnapii_pre_initiation_block_prob: {_round_prob(calibration["rnap_pre_initiation_block_prob"], 3)}
     rnapii_paused_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
     rnapii_elongating_block_prob: {_round_prob(calibration["rnap_block_prob"], 3)}
     rnapii_terminating_block_prob: {_round_prob(calibration["rnap_term_block_prob"], 3)}

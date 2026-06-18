@@ -19,7 +19,7 @@ from .lesions import lesion_stalls_cohesin
 FREE = 0
 COHESIN = 1
 RNAPII_CELL = 2
-STATE_POISED = 0
+STATE_PRE_INITIATION = 0
 STATE_PAUSED = 1
 STATE_ELONGATING = 2
 STATE_TERMINATING = 3
@@ -240,9 +240,9 @@ def translocate(
 
 def _rnapii_blocks_cohesin(rnapii, args: Dict) -> bool:
     """Return whether an RNAPII body blocks an incoming cohesin leg."""
-    state = rnapii.attrs.get("state", STATE_POISED)
-    if state == STATE_POISED:
-        prob = float(args.get("rnapii_poised_block_prob", 1.0))
+    state = rnapii.attrs.get("state", STATE_PRE_INITIATION)
+    if state == STATE_PRE_INITIATION:
+        prob = float(args.get("rnapii_pre_initiation_block_prob", 1.0))
     elif state == STATE_PAUSED:
         prob = float(
             args.get("rnapii_paused_block_prob", args.get("rnapii_block_prob", 1.0))

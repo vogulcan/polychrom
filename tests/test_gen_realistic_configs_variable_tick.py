@@ -75,7 +75,7 @@ def test_variable_tick_20s_reproduces_reference_defaults(tmp_path):
     assert gene["termination_prob"] == pytest.approx(0.0392)
 
     expected_block = math.exp(-20 / 100)
-    assert topo["rnapii_poised_block_prob"] == pytest.approx(expected_block, abs=5e-4)
+    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_paused_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_elongating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_terminating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
@@ -104,7 +104,7 @@ def test_variable_tick_4s_preserves_real_durations_and_rates(tmp_path):
     assert gene["termination_prob"] == pytest.approx(1 - math.exp(-0.002 * 4), abs=5e-5)
 
     expected_block = math.exp(-4 / 100)
-    assert topo["rnapii_poised_block_prob"] == pytest.approx(expected_block, abs=5e-4)
+    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_paused_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_elongating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
     assert topo["rnapii_terminating_block_prob"] == pytest.approx(expected_block, abs=5e-4)

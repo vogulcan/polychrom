@@ -10,7 +10,7 @@ cohesin-stall readout, and reuses the same ``_resolve_h5`` 1D runner.
 The trajectory exposes (see loop_extrusion/lef.py):
 
   * ``rnapii_positions`` (T, R, 2) = [global_site, gene_id], -1 = absent.
-  * ``rnapii_states``    (T, R)    = POISED/PAUSED/ELONGATING/TERMINATING/STALLED.
+  * ``rnapii_states``    (T, R)    = PRE-INITIATION/PAUSED/ELONGATING/TERMINATING/STALLED.
   * ``rnapii_ids``       (T, R)    = stable per-Pol uid (survives column reshuffle
                                      on unload) -> reconstructs each polymerase's
                                      load -> unload life, the basis for completion
@@ -32,10 +32,10 @@ to seconds. Four metric families are computed per gene and as a locus aggregate:
 
   PAUSING & STATE KINETICS
     pausing_index              promoter-proximal density / gene-body density
-    frac_{poised,paused,elongating,stalled,terminating}   state-time fractions
-    mean_{poised,pause,terminating}_dwell_s               per-state residence (s)
+    frac_{pre_initiation,paused,elongating,stalled,terminating}   state-time fractions
+    mean_{pre_initiation,pause,terminating}_dwell_s               per-state residence (s)
     mean_residence_s           full load->unload transcription time (s)
-    pause_release_efficiency   completed / initiated (productive fraction)
+    pause_release_efficiency   completed / initiated
 
   CO-TRANSCRIPTIONAL INTERFERENCE
     stall_frac                 STALLED / (ELONGATING+STALLED) engaged-time
@@ -93,7 +93,7 @@ from polychrom.pipelines.loop_extrusion.plugins.lesions import (  # noqa: E402
 from polychrom.pipelines.loop_extrusion.plugins.rnapii import (  # noqa: E402
     STATE_ELONGATING,
     STATE_PAUSED,
-    STATE_POISED,
+    STATE_PRE_INITIATION,
     STATE_STALLED,
     STATE_TERMINATING,
 )
@@ -101,9 +101,9 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (  # noqa: E402
 # Engaged Pol II carries a nascent transcript (productive or transiently
 # obstacle-stalled in the gene body); same convention as polii_chip_nascent_track.py.
 _ENGAGED = (STATE_ELONGATING, STATE_STALLED)
-_STATE_ORDER = [STATE_POISED, STATE_PAUSED, STATE_ELONGATING, STATE_STALLED, STATE_TERMINATING]
+_STATE_ORDER = [STATE_PRE_INITIATION, STATE_PAUSED, STATE_ELONGATING, STATE_STALLED, STATE_TERMINATING]
 _STATE_NAMES = {
-    STATE_POISED: "poised", STATE_PAUSED: "paused", STATE_ELONGATING: "elongating",
+    STATE_PRE_INITIATION: "pre_initiation", STATE_PAUSED: "paused", STATE_ELONGATING: "elongating",
     STATE_STALLED: "stalled", STATE_TERMINATING: "terminating",
 }
 
@@ -113,8 +113,8 @@ _RATE_KEYS = [
     "pol2_occupancy", "pol2_density_per_kb", "nascent_signal", "elongation_velocity_bp_s",
 ]
 _PAUSE_KEYS = [
-    "pausing_index", "frac_poised", "frac_paused", "frac_elongating", "frac_stalled",
-    "frac_terminating", "mean_poised_dwell_s", "mean_pause_dwell_s",
+    "pausing_index", "frac_pre_initiation", "frac_paused", "frac_elongating", "frac_stalled",
+    "frac_terminating", "mean_pre_initiation_dwell_s", "mean_pause_dwell_s",
     "mean_terminating_dwell_s", "mean_residence_s", "pause_release_efficiency",
 ]
 _INTERFERENCE_KEYS = ["stall_frac", "lesion_stall_frac", "cohesin_stall_frac"]
@@ -155,10 +155,6 @@ HUMAN_RANGES: dict[str, dict] = {
     "pausing_index": dict(
         lo=1.5, hi=50.0, scale=1.0, unit="", disp="~2-50 (paused genes)", soft=True,
         src="Jonkers/Lis2014 [NOTE: 5kb window here, not the ~50bp pause]"),
-    # Derived (completion/initiation per gene); the model's known realism gap.
-    "productive_fraction": dict(
-        lo=0.05, hi=0.5, scale=1.0, unit="", disp="~0.1-0.2 (rest premat. terminate)", soft=False,
-        src="Steurer2018; STL-seq Zumer/Zeitlinger (model lacks premature term.)"),
 }
 
 
@@ -166,15 +162,10 @@ def realism_report(df: pd.DataFrame) -> pd.DataFrame:
     """Per-gene median of each trackable metric vs its human-biology range.
 
     Flags each as OK / LOW / HIGH (median inside / below / above the band) and
-    reports the fraction of genes inside the band. ``productive_fraction`` is
-    derived from the completion/initiation columns."""
+    reports the fraction of genes inside the band."""
     rows = []
     for key, r in HUMAN_RANGES.items():
-        if key == "productive_fraction":
-            init = pd.to_numeric(df.get("initiation_rate_per_min"), errors="coerce")
-            comp = pd.to_numeric(df.get("completion_rate_per_min"), errors="coerce")
-            s = (comp / init.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).dropna()
-        elif key in df.columns:
+        if key in df.columns:
             s = pd.to_numeric(df[key], errors="coerce").dropna()
         else:
             continue
@@ -249,7 +240,7 @@ class _UidTrack:
     """Accumulated life of one polymerase (keyed by its stable uid)."""
 
     __slots__ = ("gene", "first_frame", "last_frame", "prev_pos", "adv_sites",
-                 "n_poised", "n_paused", "n_pause_episodes", "n_elong", "n_term",
+                 "n_pre_initiation", "n_paused", "n_pause_episodes", "n_elong", "n_term",
                  "in_pause", "reached_terminating")
 
     def __init__(self, gene: int, frame: int, pos: int):
@@ -258,7 +249,7 @@ class _UidTrack:
         self.last_frame = frame
         self.prev_pos = pos
         self.adv_sites = 0
-        self.n_poised = 0
+        self.n_pre_initiation = 0
         self.n_paused = 0
         self.n_pause_episodes = 0
         self.n_elong = 0
@@ -393,8 +384,8 @@ def measure_transcription(
                     if tr is None:
                         tr = tracks[uid] = _UidTrack(g, gf, p)
                     tr.last_frame = gf
-                    if s_code == STATE_POISED:
-                        tr.n_poised += 1
+                    if s_code == STATE_PRE_INITIATION:
+                        tr.n_pre_initiation += 1
                     elif s_code == STATE_PAUSED:
                         tr.n_paused += 1
                         if not tr.in_pause:
@@ -426,7 +417,7 @@ def measure_transcription(
     init_ct = np.zeros(n_genes, dtype=np.int64)        # loaded in-window (uncensored start)
     completed_ct = np.zeros(n_genes, dtype=np.int64)   # reached TES (terminating)
     adv_sites = np.zeros(n_genes, dtype=np.int64)
-    poised_dwell: list[list[float]] = [[] for _ in range(n_genes)]
+    pre_initiation_dwell: list[list[float]] = [[] for _ in range(n_genes)]
     term_dwell: list[list[float]] = [[] for _ in range(n_genes)]
     residence: list[list[float]] = [[] for _ in range(n_genes)]
     pause_ticks = np.zeros(n_genes, dtype=np.int64)
@@ -439,7 +430,7 @@ def measure_transcription(
         new = tr.first_frame > 0                       # not present at frame 0
         if new:
             init_ct[g] += 1
-            poised_dwell[g].append(tr.n_poised * tick_seconds)
+            pre_initiation_dwell[g].append(tr.n_pre_initiation * tick_seconds)
         if tr.reached_terminating:
             completed_ct[g] += 1
             term_dwell[g].append(tr.n_term * tick_seconds)
@@ -479,7 +470,7 @@ def measure_transcription(
                                          if elong_ticks[g] > 0 else float("nan")),
             # pausing & state kinetics
             "pausing_index": (prox_d / body_d if body_d > 0 else float("nan")),
-            "mean_poised_dwell_s": _mean(poised_dwell[g]),
+            "mean_pre_initiation_dwell_s": _mean(pre_initiation_dwell[g]),
             "mean_pause_dwell_s": (pause_ticks[g] / pause_episodes[g] * tick_seconds
                                    if pause_episodes[g] > 0 else float("nan")),
             "mean_terminating_dwell_s": _mean(term_dwell[g]),
@@ -597,7 +588,7 @@ def plot_distributions(df: pd.DataFrame, out_path: Path, *, title: str) -> None:
 
     # Panel 7: where Pol II spends its time (mean state-time fractions, one stacked bar).
     ax = axes[2, 0]
-    palette = [("poised", "#c9d6df"), ("paused", "#f2c14e"), ("elongating", "#3b8a5a"),
+    palette = [("pre_initiation", "#c9d6df"), ("paused", "#f2c14e"), ("elongating", "#3b8a5a"),
                ("stalled", "#A63446"), ("terminating", "#6b4e9e")]
     left = 0.0
     for name, color in palette:
@@ -605,7 +596,7 @@ def plot_distributions(df: pd.DataFrame, out_path: Path, *, title: str) -> None:
         ax.barh(0, frac, left=left, color=color, edgecolor="white")
         if frac > 0.04:
             ax.text(left + frac / 2, 0, f"{name}\n{frac*100:.0f}%", ha="center", va="center",
-                    fontsize=8.5, color="white" if name != "poised" else "#333")
+                    fontsize=8.5, color="white" if name != "pre_initiation" else "#333")
         left += frac
     ax.set_xlim(0, 1); ax.set_ylim(-0.6, 0.6); ax.set_yticks([])
     ax.set_title("Where Pol II spends its time\n(mean fraction per state)", fontsize=11.5, pad=5)

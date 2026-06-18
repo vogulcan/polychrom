@@ -42,9 +42,9 @@ lef:
     rnapii_pause_cohesin_restraint: 0.3
     rnapii_pause_restraint_window: 1
     # Per-tick cohesin bypass of a Pol II barrier (tbypass ~100 s -> k ~0.01/s, Banigan).
-    # POISED pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
+    # pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
     # paused / elongating / terminating Pol II are strong barriers.
-    rnapii_poised_block_prob: 0.513
+    rnapii_pre_initiation_block_prob: 0.513
     rnapii_paused_block_prob: 0.923
     rnapii_elongating_block_prob: 0.923
     rnapii_terminating_block_prob: 0.923

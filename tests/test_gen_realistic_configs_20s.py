@@ -50,7 +50,7 @@ def test_gen_realistic_configs_20s_defaults(tmp_path):
     assert topo1["rnapii_stall_prob"] == 0.0
     assert topo1["rnapii_push_prob"] == 0.0
     assert topo1["rnapii_headon_push_prob"] == 1.0
-    assert topo1["rnapii_poised_block_prob"] == pytest.approx(0.819)
+    assert topo1["rnapii_pre_initiation_block_prob"] == pytest.approx(0.819)
     assert topo1["rnapii_paused_block_prob"] == pytest.approx(0.819)
     assert topo1["rnapii_elongating_block_prob"] == pytest.approx(0.819)
     assert topo1["rnapii_terminating_block_prob"] == pytest.approx(0.819)

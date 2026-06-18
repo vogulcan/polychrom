@@ -68,7 +68,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
   .swatch.cohesin { width:16px; height:3px; border-radius:999px; background:#2563eb; }
   .swatch.gene-body { width:16px; height:4px; border-radius:999px;
                       background:linear-gradient(90deg,#2563eb,#dc2626,#16a34a); }
-  .swatch.rnapii-poised { background:#64748b; border-radius:999px; }
+  .swatch.rnapii-pre-initiation { background:#64748b; border-radius:999px; }
   .swatch.rnapii-paused { background:#f59e0b; border-radius:999px; }
   .swatch.rnapii-elongating { background:#be185d; border-radius:999px; }
   .swatch.lesion { background:#dc2626; transform:rotate(45deg); }
@@ -102,7 +102,7 @@ _TEMPLATE = r"""<!DOCTYPE html>
     <span class="legend-item"><span class="swatch promoter"></span> promoter</span>
     <span class="legend-item"><span class="swatch enhancer"></span> enhancer</span>
     <span class="legend-item"><span class="swatch gene-body"></span> gene body by G#</span>
-    <span class="legend-item"><span class="swatch rnapii-poised"></span> RNAPII poised</span>
+    <span class="legend-item"><span class="swatch rnapii-pre-initiation"></span> RNAPII pre-initiation</span>
     <span class="legend-item"><span class="swatch rnapii-paused"></span> RNAPII paused</span>
     <span class="legend-item"><span class="swatch rnapii-elongating"></span> RNAPII elongating</span>
     <span class="legend-item"><span class="swatch lesion"></span> DNA lesion</span>
@@ -152,7 +152,7 @@ const PALETTE = ["#2563eb","#dc2626","#16a34a","#9333ea","#ea580c","#0891b2",
                  "#c026d3","#65a30d","#d97706","#4f46e5","#e11d48","#059669"];
 const C_PROMOTER = "#16a34a", C_ENH_FILL = "#f59e0b", C_ENH_STROKE = "#d97706", C_CTCF = "#6b7280";
 const RNAPII_COLORS = ["#64748b", "#f59e0b", "#be185d", "#7c3aed", "#dc2626"];
-const RNAPII_STATES = ["poised", "paused", "elongating", "terminating", "stalled"];
+const RNAPII_STATES = ["pre-initiation", "paused", "elongating", "terminating", "stalled"];
 const cohColor = id => PALETTE[((id % PALETTE.length) + PALETTE.length) % PALETTE.length];
 
 const N = DATA.latticeSize;

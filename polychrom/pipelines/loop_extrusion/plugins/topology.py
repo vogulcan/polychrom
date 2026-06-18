@@ -406,7 +406,7 @@ def gene_aware_topology(
     rnapii_headon_push_prob: float = 0.0,
     rnapii_pause_cohesin_restraint: float = 1.0,
     rnapii_pause_restraint_window: int = 1,
-    rnapii_poised_block_prob: float = 1.0,
+    rnapii_pre_initiation_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
     rnapii_terminating_block_prob: Optional[float] = None,
@@ -465,7 +465,7 @@ def gene_aware_topology(
     args["rnapii_pause_cohesin_restraint"] = float(rnapii_pause_cohesin_restraint)
     args["rnapii_pause_restraint_window"] = int(rnapii_pause_restraint_window)
     fallback_block_prob = float(rnapii_block_prob)
-    args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
+    args["rnapii_pre_initiation_block_prob"] = float(rnapii_pre_initiation_block_prob)
     args["rnapii_paused_block_prob"] = (
         fallback_block_prob
         if rnapii_paused_block_prob is None
@@ -540,7 +540,7 @@ def gene_aware_convergent_tad_topology(
     rnapii_headon_push_prob: float = 0.0,
     rnapii_pause_cohesin_restraint: float = 1.0,
     rnapii_pause_restraint_window: int = 1,
-    rnapii_poised_block_prob: float = 1.0,
+    rnapii_pre_initiation_block_prob: float = 1.0,
     rnapii_paused_block_prob: Optional[float] = None,
     rnapii_elongating_block_prob: Optional[float] = None,
     rnapii_terminating_block_prob: Optional[float] = None,
@@ -592,7 +592,7 @@ def gene_aware_convergent_tad_topology(
     args["rnapii_pause_cohesin_restraint"] = float(rnapii_pause_cohesin_restraint)
     args["rnapii_pause_restraint_window"] = int(rnapii_pause_restraint_window)
     fallback_block_prob = float(rnapii_block_prob)
-    args["rnapii_poised_block_prob"] = float(rnapii_poised_block_prob)
+    args["rnapii_pre_initiation_block_prob"] = float(rnapii_pre_initiation_block_prob)
     args["rnapii_paused_block_prob"] = (
         fallback_block_prob
         if rnapii_paused_block_prob is None

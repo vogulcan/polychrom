@@ -34,7 +34,7 @@ from polychrom.pipelines.loop_extrusion.plugins.rnapii import (
     RNAPII,
     STATE_ELONGATING,
     STATE_PAUSED,
-    STATE_POISED,
+    STATE_PRE_INITIATION,
     STATE_TERMINATING,
     build_genes,
     compute_ep_contacts,
@@ -190,7 +190,7 @@ lef:
 def _cohesin_hits_rnapii_args(
     state,
     *,
-    poised_block=1.0,
+    pre_initiation_block=1.0,
     paused_block=1.0,
     elongating_block=1.0,
     block=None,
@@ -213,7 +213,7 @@ def _cohesin_hits_rnapii_args(
         "rnapii_by_pos": {2: rnap},
         "tes_by_pos": {},
         "cohesin_leg_by_pos": {3: left, 8: right},
-        "rnapii_poised_block_prob": poised_block,
+        "rnapii_pre_initiation_block_prob": pre_initiation_block,
         "rnapii_paused_block_prob": paused_block,
         "rnapii_elongating_block_prob": elongating_block,
     }
@@ -222,10 +222,10 @@ def _cohesin_hits_rnapii_args(
     return occupied, cohesins, args
 
 
-def test_poised_rnapii_block_probability_controls_cohesin_bypass():
+def test_pre_initiation_rnapii_block_probability_controls_cohesin_bypass():
     occupied, cohesins, args = _cohesin_hits_rnapii_args(
-        STATE_POISED,
-        poised_block=0.0,
+        STATE_PRE_INITIATION,
+        pre_initiation_block=0.0,
         paused_block=1.0,
         elongating_block=1.0,
     )
@@ -762,13 +762,13 @@ def _push_args(extra=None):
     return args
 
 
-def test_poised_rnapii_cannot_push_cohesin():
+def test_pre_initiation_rnapii_cannot_push_cohesin():
     # Non-elongating Pol II is a stationary block: it never displaces cohesin
     # even with push_prob = 1.0 (Fursova & Larson 2024, Fig 3a).
     occupied = np.zeros(8, dtype=np.int8)
     leg = Leg(2, {"stalled": False, "CTCF": False, "dir": 1})  # co-directional
     rnap = RNAPII(pos=1, gene_id=0, direction=1)
-    rnap.attrs["state"] = STATE_POISED
+    rnap.attrs["state"] = STATE_PRE_INITIATION
     occupied[1] = RNAPII_CELL
     occupied[2] = COHESIN
     args = _push_args({"cohesin_leg_by_pos": {2: leg}})

@@ -206,7 +206,7 @@ def rnapii_metrics(rnapii_positions: np.ndarray, rnapii_states: np.ndarray,
     }
     if tot > 0:
         out["state_mix_pct"] = {
-            "POISED": float(100 * ((states == 0) & present).sum() / tot),
+            "PRE-INITIATION": float(100 * ((states == 0) & present).sum() / tot),
             "PAUSED": float(100 * ((states == 1) & present).sum() / tot),
             "ELONGATING": float(100 * ((states == 2) & present).sum() / tot),
             "TERMINATING": float(100 * ((states == 3) & present).sum() / tot),
