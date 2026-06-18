@@ -109,7 +109,7 @@ polychrom-loopext --debug all config.yaml runs/x   # extra debug detail
 
 The `compare` subcommand produces side-by-side 1D + 3D metrics and comparison
 plots (loop-length, P(s), insulation, contact maps, CTCF-anchor pile-ups, and
-Flyamer rescaled-TAD pile-ups) into an output directory. It accepts either a
+rescaled-TAD pile-ups) into an output directory. It accepts either a
 YAML config or a run folder for each side; a run folder is auto-detected for its
 `LEFPositions.h5` and `contact_map*.npy`.
 

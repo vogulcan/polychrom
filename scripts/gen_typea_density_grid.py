@@ -93,6 +93,10 @@ TYPEA_PERKB_KEY = "typea_per_kb_genebody"
 TYPEA_PERKB_LABELS = {
     TYPEA_PERKB_KEY: "Type-A lesions per kb of gene body\n(measured from trajectory)",
 }
+# Same readout inverted to a spacing (kb of gene body per Type-A lesion).
+TYPEA_KB_PER_LESION_LABELS = {
+    TYPEA_PERKB_KEY: "kb of gene body per Type-A lesion\n(measured from trajectory)",
+}
 
 
 def gene_body_mask(base: dict) -> np.ndarray:
@@ -426,26 +430,28 @@ def main() -> None:
             value_label="Type-A lesions / kb gene body", cell_fmt="{:.4f}", cell_fontsize=4.5,
             center=None, cmap=SEQ_CMAP,
         )
-        # Same grid/colour scale as above, but annotate each cell as a spacing
-        # ("1 lesion per X kb of gene body") -- the reciprocal of the per-kb density.
-        # Cells with zero/non-finite density have no finite spacing -> "n/a".
+        # Same readout expressed as a SPACING: kb of gene body per Type-A lesion =
+        # 1 / (Type-A per kb). Plotting the reciprocal grid makes the colour scale,
+        # colorbar ticks and integer cell annotations all consistent (kb, not /kb).
+        # Zero/non-finite density -> no finite spacing -> NaN cell ("n/a").
         ta_perkb_inv_svg = out_dir / "ta_density_typea_one_per_kb_genebody.svg"
+        dens = measured[TYPEA_PERKB_KEY]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            spacing = np.where(dens > 0, 1.0 / dens, np.nan)
+        spacing_grid = {TYPEA_PERKB_KEY: spacing}
 
-        def _one_per_kb(v: float) -> str:
-            if v <= 0:
-                return "n/a"
-            x = 1.0 / v
-            return f"1 per {x:.0f} kb" if x >= 10 else f"1 per {x:.1f} kb"
+        def _kb_per_lesion(v: float) -> str:
+            return f"{round(v):d}"
 
         plot_heatmaps(
-            measured, TYPEA_PERKB_LABELS,
+            spacing_grid, TYPEA_KB_PER_LESION_LABELS,
             y_values=ta_sorted, y_label=y_label, y_fmt=y_fmt, density_axis=density_axis, x_label=x_label,
             y_ticklabels=y_ticklabels,
             out_path=ta_perkb_inv_svg,
-            title=(f"Measured Type-A lesion burden inside gene bodies (from trajectory)\n"
+            title=(f"Measured Type-A lesion spacing inside gene bodies (from trajectory)\n"
                    f"gene-body length={gb_kb} kb; {sub}"),
-            value_label="Type-A lesions / kb gene body", cell_text=_one_per_kb, cell_fontsize=4.0,
-            center=None, cmap=SEQ_CMAP,
+            value_label="kb of gene body per Type-A lesion", cell_text=_kb_per_lesion, cell_fontsize=4.0,
+            center=None, log_norm=True, cmap=SEQ_CMAP,
         )
         occ_svg = out_dir / "ta_density_measured_stall.svg"
         plot_heatmaps(

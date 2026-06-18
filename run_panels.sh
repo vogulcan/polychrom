@@ -1,7 +1,7 @@
 
 # Env param
 micromambaENV=polychrom # Name of micromamba environment with required dependencies. Adjust if yours is different.
-nproc=36 # Number of parallel processes during parameter search (Running multiple simulations in parallel). Adjust based on your CPU cores.
+nproc=42 # Number of parallel processes during parameter search (Running multiple simulations in parallel). Adjust based on your CPU cores.
 
 # Simulation parameters
 suffix=10k # Suffix for output folder and config files. Adjust to your liking.
@@ -11,7 +11,7 @@ warmup_steps=10000 ### ~22 hours warmup for equilibration, prior to production (
 trajectory_length=20000 ### ~44 hours production (recorded).
 tickseconds=8 # Number of seconds per simulation tick. 2kb free cohesin extrusion per tick, so 8s/tick = 250bp/s extrusion speed.
 nreplicates=20 # Simulation replicates. All run on the same topology.
-bstr_mult=4.0 # Boundary strength multiplier, increases the probability of LEF stalling at CTCF sites. One time control. It is not checked per simulation tick.
+bstr_mult=3.75 # Boundary strength multiplier, increases the probability of LEF stalling at CTCF sites. One time control. It is not checked per simulation tick.
 typea_prob=0.25 # Type A lesion probability, i.e. if a lesion spawns on a gene body, what ratio of those lesions are Type A.
 blockProb=0.985 # Probability of Type A (during pre-repair + repair) and Type B (during repair) lesions blocking cohesin extrusion. Evaluated per tick. 0.985 = 1.5% chance of bypassing a lesion per 8 seconds.
 prerecognition_seconds=2400 # a.k.a pre-repair seconds, per tick probabilistic. Average time for a lesion to be recognized (and thus start repair). Evaluated per tick. 2400s = 40 minutes average time to recognition.
@@ -48,11 +48,11 @@ micromamba run -n polychrom python scripts/gen_cohesin_barrier_eval.py \
   --h5 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \
   --out-dir ${outFolder}/${suffix}_Baseline_cohesin_barrier
 
-#### Transcription and RNAPII~cohesin QC --- END #####
+### Transcription and RNAPII~cohesin QC --- END #####
 
-#### Parameter sweeps --- START #####
+### Parameter sweeps --- START #####
 
-# Boundary strength sweep (boundary strength multiplier)
+Boundary strength sweep (boundary strength multiplier)
 micromamba run -n polychrom python scripts/sweep_rnapoff_boundary_strength_1d.py \
   --config1 configs/config1_${suffix}.yaml \
   --h5-config1 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \
@@ -101,3 +101,36 @@ micromamba run -n polychrom python scripts/gen_lesion_timing_grids.py \
   --jobs ${nproc}
 
 #### Parameter sweeps --- END #####
+
+#### Free cohesin lifetime vs Cohesin stalled at CTCF sweep --- START #####
+
+micromamba run -n polychrom python scripts/sweep_lifetime_cohesin_vs_ctcf_2d.py \
+  --config1 configs/config1_${suffix}.yaml --h5-config1 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \
+  --out-dir ${outFolder}/results_lifetime_grid \
+  --cohesin-lifetime-multipliers 0.125,0.25,0.5,1,2,4,6 --ctcf-lifetime-multipliers 0.125,0.25,0.5,1,2,4,6 \
+  --jobs ${nproc}
+
+#### Free cohesin lifetime vs Cohesin stalled at CTCF sweep --- END #####
+
+#### RNAPII-cohesin block prob vs Cohesin lifetime at CTCF sweep --- START #####
+
+micromamba run -n polychrom python scripts/sweep_blockprob_vs_ctcf_lifetime_2d.py \
+  --config1 configs/config1_${suffix}.yaml --h5-config1 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \
+  --out-dir ${outFolder}/results_blockprob_ctcf_grid \
+  --block-prob-lo 0.90 --block-prob-hi 0.95 --block-prob-step 0.005 \
+  --ctcf-lifetime-multipliers 0.125,0.25,0.5,1,2,4,6 \
+  --seconds-per-step ${tickseconds} \
+  --jobs ${nproc}
+
+#### RNAPII-cohesin block prob vs Cohesin lifetime at CTCF sweep --- END #####
+
+#### Cohesin separation (density) vs Cohesin lifetime at CTCF sweep --- START #####
+
+micromamba run -n polychrom python scripts/sweep_separation_vs_ctcf_lifetime_2d.py \
+  --config1 configs/config1_${suffix}.yaml --h5-config1 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \
+  --out-dir ${outFolder}/results_separation_ctcf_grid \
+  --separation-multipliers 0.125,0.25,0.5,1,2,4,6 \
+  --ctcf-lifetime-multipliers 0.125,0.25,0.5,1,2,4,6 \
+  --jobs ${nproc}
+
+#### Cohesin separation (density) vs Cohesin lifetime at CTCF sweep --- END #####

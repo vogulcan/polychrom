@@ -76,7 +76,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
-from matplotlib.colors import LinearSegmentedColormap, Normalize, TwoSlopeNorm
+from matplotlib.colors import LinearSegmentedColormap, LogNorm, Normalize, TwoSlopeNorm
 
 # Diverging fold-change colormap shared with sweep_rnapoff_boundary_strength_1d.py:
 # slate-blue (below baseline) -> white (fold = 1.0, the TwoSlopeNorm centre) ->
@@ -541,6 +541,7 @@ def plot_heatmaps(
     cell_text: "Callable[[float], str] | None" = None,
     cell_fontsize: float = 6.0,
     center: float | None = 1.0,
+    log_norm: bool = False,
     cmap=FOLD_CMAP,
     x_label: str = "Lesion density (lesions/Mbp)",
     y_ticklabels: list[str] | None = None,
@@ -550,7 +551,10 @@ def plot_heatmaps(
 
     ``center`` selects the colour scale: a float centres a diverging map there
     (e.g. fold = 1.0); ``None`` uses a plain sequential scale spanning the data
-    (for standalone measured quantities that have no natural midpoint).
+    (for standalone measured quantities that have no natural midpoint). With
+    ``center=None`` and ``log_norm=True`` the colour scale (and colorbar ticks) is
+    logarithmic over the positive data -- the in-cell annotations are unaffected,
+    still showing the raw values.
 
     ``cell_text`` overrides only the in-cell annotation text: a callable mapping a
     finite cell value to its display string (non-finite cells still show "n/a").
@@ -574,6 +578,12 @@ def plot_heatmaps(
         if center is not None:
             vmin, vmax = min(dmin, center - 1e-6), max(dmax, center + 1e-6)
             norm = TwoSlopeNorm(vcenter=center, vmin=vmin, vmax=vmax)
+        elif log_norm:
+            # Logarithmic colour scale (positive data only); cell annotations are
+            # unaffected -- they print the raw values, not the log-mapped colour.
+            pos = finite[finite > 0]
+            lo = float(pos.min()) if pos.size else 1e-6
+            norm = LogNorm(vmin=lo, vmax=dmax if dmax > lo else lo * 10.0)
         else:
             norm = Normalize(vmin=dmin, vmax=dmax if dmax > dmin else dmin + 1e-6)
         cmap_obj = (plt.get_cmap(cmap) if isinstance(cmap, str) else cmap).copy()
