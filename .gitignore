@@ -20,6 +20,6 @@ CLAUDE.md
 trajectory
 configs_test
 runs_test
-results
+
+# res
 results_10k
-results_10k_3.75

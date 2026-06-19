@@ -60,6 +60,7 @@ def _advance_one_step(
                 cohesins,
                 args["genes"],
                 tolerance=tol,
+                chain_length=args.get("chain_length"),
             )
         rnapii_load_fn(rnapiis, occupied, args)
         rnapii_translocate_fn(rnapiis, cohesins, occupied, args)
@@ -150,12 +151,25 @@ def run(cfg: LEFConfig) -> Path:
     # max_rnapii is per-chain; total recording width scales with num_chains.
     rnapii_cap = cfg.max_rnapii * cfg.num_chains
 
+    # Storage chunks: whole rows (full width, unsplit last axis) with a time depth
+    # matching the write block. h5py's auto-chunking otherwise splits the columns
+    # AND the size-2 last axis, so a script-side time-slice read (``ds[a:b]``) has
+    # to touch many tiny chunks; whole-row chunks let it decompress whole rows
+    # (~20% faster reads, e.g. gen_transcription_metrics). Aligning the time depth
+    # to the write block also keeps each ``dset[start:end] = buffer`` write within
+    # whole chunks. Data is byte-identical; only the on-disk layout changes.
+    _blk = int(boundaries[1] - boundaries[0]) if len(boundaries) > 1 else traj_len
+
+    def _tchunk(row_bytes: int, cap_bytes: int = 8 << 20) -> int:
+        return max(1, min(traj_len, _blk, max(1, cap_bytes // max(1, row_bytes))))
+
     with h5py.File(out_path, "w") as fh:
         dset = fh.create_dataset(
             "positions",
             shape=(traj_len, n_lefs, 2),
             dtype=np.int32,
-            compression="gzip",
+            chunks=(_tchunk(n_lefs * 2 * 4), n_lefs, 2),
+            compression="lzf",
         )
         dset_rnapii = None
         dset_states = None
@@ -165,14 +179,16 @@ def run(cfg: LEFConfig) -> Path:
                 "rnapii_positions",
                 shape=(traj_len, rnapii_cap, 2),
                 dtype=np.int32,
-                compression="gzip",
+                chunks=(_tchunk(rnapii_cap * 2 * 4), rnapii_cap, 2),
+                compression="lzf",
                 fillvalue=-1,
             )
             dset_states = fh.create_dataset(
                 "rnapii_states",
                 shape=(traj_len, rnapii_cap),
                 dtype=np.int8,
-                compression="gzip",
+                chunks=(_tchunk(rnapii_cap), rnapii_cap),
+                compression="lzf",
                 fillvalue=-1,
             )
             # Stable per-Pol identity: the live rnapii list is compacted on unload,
@@ -182,7 +198,8 @@ def run(cfg: LEFConfig) -> Path:
                 "rnapii_ids",
                 shape=(traj_len, rnapii_cap),
                 dtype=np.int32,
-                compression="gzip",
+                chunks=(_tchunk(rnapii_cap * 4), rnapii_cap),
+                compression="lzf",
                 fillvalue=-1,
             )
 
@@ -195,15 +212,18 @@ def run(cfg: LEFConfig) -> Path:
         if lesion_recorded:
             dset_lesions = fh.create_dataset(
                 "lesions", shape=(traj_len, lesion_cap), dtype=np.int32,
-                compression="gzip", fillvalue=-1,
+                chunks=(_tchunk(lesion_cap * 4), lesion_cap),
+                compression="lzf", fillvalue=-1,
             )
             dset_lesion_types = fh.create_dataset(
                 "lesion_types", shape=(traj_len, lesion_cap), dtype=np.int8,
-                compression="gzip", fillvalue=-1,
+                chunks=(_tchunk(lesion_cap), lesion_cap),
+                compression="lzf", fillvalue=-1,
             )
             dset_lesion_states = fh.create_dataset(
                 "lesion_states", shape=(traj_len, lesion_cap), dtype=np.int8,
-                compression="gzip", fillvalue=-1,
+                chunks=(_tchunk(lesion_cap), lesion_cap),
+                compression="lzf", fillvalue=-1,
             )
 
         rec_meter = ProgressMeter(traj_len, "lef:record")
@@ -260,24 +280,31 @@ def run(cfg: LEFConfig) -> Path:
                     lesion_update_fn=lesion_update_fn,
                 )
 
-                for j, coh in enumerate(cohesins):
-                    buffer[i, j, 0] = coh.left.pos
-                    buffer[i, j, 1] = coh.right.pos
+                # Bulk-assign each frame from Python lists rather than per-element
+                # numpy __setitem__ (millions of scalar sets per run). Same values,
+                # same slots -> byte-identical buffers; the -1 padding tails are
+                # left untouched exactly as before.
+                buffer[i, : len(cohesins)] = [
+                    (coh.left.pos, coh.right.pos) for coh in cohesins
+                ]
 
                 if rbuf is not None:
-                    for j, r in enumerate(rnapiis[:rnapii_cap]):
-                        rbuf[i, j, 0] = r.pos
-                        rbuf[i, j, 1] = r.gene_id
-                        sbuf[i, j] = r.attrs.get("state", -1)
-                        ibuf[i, j] = r.uid
+                    live = rnapiis[:rnapii_cap]
+                    n = len(live)
+                    if n:
+                        rbuf[i, :n, 0] = [r.pos for r in live]
+                        rbuf[i, :n, 1] = [r.gene_id for r in live]
+                        sbuf[i, :n] = [r.attrs.get("state", -1) for r in live]
+                        ibuf[i, :n] = [r.uid for r in live]
 
                 if lbuf is not None:
                     cur = args["lesions"]
-                    for j, site in enumerate(sorted(cur)[:lesion_cap]):
-                        les = cur[site]
-                        lbuf[i, j] = site
-                        ltbuf[i, j] = les.ltype
-                        lsbuf[i, j] = les.state
+                    sites = sorted(cur)[:lesion_cap]
+                    n = len(sites)
+                    if n:
+                        lbuf[i, :n] = sites
+                        ltbuf[i, :n] = [cur[s].ltype for s in sites]
+                        lsbuf[i, :n] = [cur[s].state for s in sites]
 
                 rec_meter.update(start + i + 1)
 
@@ -319,14 +346,16 @@ def run(cfg: LEFConfig) -> Path:
         if rnapii_enabled:
             fh.attrs["max_rnapii"] = cfg.max_rnapii
             fh.attrs["rnapii_cap"] = rnapii_cap
+            fh.attrs["rnapii_pause_term_prob"] = float(args.get("rnapii_pause_term_prob", 0.0))
             genes = args.get("genes", [])
             if genes:
                 gene_arr = np.array(
-                    [(g.gene_id, g.tss, g.tes, g.direction, g.load_prob)
+                    [(g.gene_id, g.tss, g.tes, g.direction, g.load_prob,
+                      (getattr(g, "gene_class", "") or "").encode("ascii", "ignore")[:16])
                      for g in genes],
                     dtype=[("gene_id", "i4"), ("tss", "i4"),
                            ("tes", "i4"), ("direction", "i4"),
-                           ("load_prob", "f4")],
+                           ("load_prob", "f4"), ("gene_class", "S16")],
                 )
                 fh.create_dataset("genes", data=gene_arr)
 

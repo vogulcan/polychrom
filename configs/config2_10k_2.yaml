@@ -1,0 +1,260 @@
+lef:
+  chain_length: 10000
+  num_chains: 5
+  separation: 240
+  lifetime: 150
+  lifetime_stalled: 150
+  lifetime_ctcf: 600 # Cohesin lifetime when its captured by a CTCF site (boosted from the base lifetime)
+  tick_seconds: 8
+  warmup_steps: 10000
+  trajectory_length: 20000
+  chunk_size: 50
+  seed: 42
+  max_rnapii: 0
+
+  topology_kwargs:
+    tads:
+      - {left: 0, right: 1864, left_strength: 0.15, right_strength: 0.11}
+      - {left: 1865, right: 3060, left_strength: 0.11, right_strength: 0.13}
+      - {left: 3061, right: 4176, left_strength: 0.13, right_strength: 0.13}
+      - {left: 4177, right: 5321, left_strength: 0.13, right_strength: 0.18}
+      - {left: 5322, right: 6171, left_strength: 0.18, right_strength: 0.17}
+      - {left: 6172, right: 6680, left_strength: 0.17, right_strength: 0.18}
+      - {left: 6681, right: 7229, left_strength: 0.18, right_strength: 0.15}
+      - {left: 7230, right: 8421, left_strength: 0.15, right_strength: 0.13}
+      - {left: 8422, right: 9448, left_strength: 0.13, right_strength: 0.15}
+      - {left: 9449, right: 9999, left_strength: 0.15, right_strength: 0.15}
+    default_boundary_strength: 0.15
+    release_prob: 0.0
+    include_chromosome_ends: true
+    # Paper-calibrated: RNAP is a permeable moving barrier (Banigan), NOT a fast
+    # cohesin-eviction state. Keep RNAP-stalled cohesin at the base lifetime -- a
+    # SHORT eviction lifetime makes transcription DEPLETE (not accumulate) cohesin
+    # at genes, the opposite of the Banigan moving-barrier effect (verified in 1D).
+    lifetime_rnapii_stalled: 150
+    rnapii_stride: 1
+    # Decelerated step prob for a Pol crawling the per-gene 3' termination window (Schwalb 2016
+    # window median ~3.3 kb; Cortazar 2019 3' rate ~0.7-0.9 kb/min). Vacates the TES quickly so
+    # the 3' end stops capping output at 1/dwell (which packed long active gene bodies solid).
+    rnapii_termination_step_prob: 0.136
+    # Banigan moving barrier (per-encounter probs, tick-independent): elongating RNAP
+    # wins head-on and pushes the converging cohesin; co-directional contact mostly
+    # only slows cohesin. stall_prob is an intrinsic floor (effective head-on push ~0.72).
+    rnapii_stall_prob: 0.0
+    rnapii_push_prob: 0.0
+    rnapii_headon_push_prob: 1.0
+    rnapii_pause_cohesin_restraint: 1.0
+    rnapii_pause_restraint_window: 1
+    # Promoter-proximal premature termination as a per-tick channel competing with
+    # productive release (pause_release_prob): single-Pol pause dwell ~0.4-0.5 min
+    # (Lysakovskaia 2025), productive fraction ~0.1-0.25 (activity-dependent).
+    rnapii_pause_term_prob: 0.1813
+    # Per-tick cohesin bypass of a Pol II barrier (tbypass ~100 s -> k ~0.01/s, Banigan).
+    # pre-initiation Pol II is a LEAKY barrier (cohesin bypasses ~8x faster);
+    # paused / elongating / terminating Pol II are strong barriers.
+    rnapii_pre_initiation_block_prob: 0.513
+    rnapii_paused_block_prob: 0.923
+    rnapii_elongating_block_prob: 0.923
+    rnapii_terminating_block_prob: 0.923
+    ep_contact_tolerance: 1
+    replicate_genes_across_chains: true
+    targeted_load_prob: 0.0
+    loading_window: 1
+    target_enhancers: false
+    target_tss: false
+    weight_loading_by_activity: false
+    lesion_spacing: 0            # lesions off (config1/2/3)
+    genes:
+      - {tss: 1860, tes: 1852, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2686, pause_release_prob: 0.0553, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 745, tes: 1545, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [625, 698, 729, 730, 754], enhancer_logic: additive, initiation_prob: 0.049, pause_release_prob: 0.0315, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 211, tes: 548, load_prob: 0.08436, requires_enhancer: true, load_requires_enhancer: true, enhancers: [347], enhancer_logic: additive, initiation_prob: 0.3024, pause_release_prob: 0.0351, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 1585, tes: 1713, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1621], enhancer_logic: additive, initiation_prob: 0.2563, pause_release_prob: 0.0356, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 650, tes: 737, load_prob: 0.0311, requires_enhancer: true, load_requires_enhancer: true, enhancers: [584, 635, 661, 771], enhancer_logic: additive, initiation_prob: 0.1298, pause_release_prob: 0.0209, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 20}
+      - {tss: 1755, tes: 1825, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1842], enhancer_logic: additive, initiation_prob: 0.2615, pause_release_prob: 0.0458, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 8}
+      - {tss: 72, tes: 15, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [20, 109, 993], enhancer_logic: additive, initiation_prob: 0.1001, pause_release_prob: 0.0303, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 145, tes: 192, load_prob: 0.22865, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.6749, pause_release_prob: 0.0785, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 610, tes: 567, load_prob: 0.0194, requires_enhancer: true, load_requires_enhancer: true, enhancers: [595, 619], enhancer_logic: additive, initiation_prob: 0.3039, pause_release_prob: 0.042, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 122, tes: 79, load_prob: 0.14876, requires_enhancer: true, load_requires_enhancer: true, enhancers: [100, 149, 165], enhancer_logic: additive, initiation_prob: 0.1308, pause_release_prob: 0.0315, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 1556, tes: 1579, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1543, 1572], enhancer_logic: additive, initiation_prob: 0.2489, pause_release_prob: 0.0404, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 1718, tes: 1736, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1655, 1657, 1708, 1798], enhancer_logic: additive, initiation_prob: 0.0546, pause_release_prob: 0.0361, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 637, tes: 622, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [536, 650], enhancer_logic: additive, initiation_prob: 0.1853, pause_release_prob: 0.0388, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 1830, tes: 1834, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1791, 1796, 1814], enhancer_logic: additive, initiation_prob: 0.2852, pause_release_prob: 0.0497, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 1840, tes: 1844, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [524, 1481, 1823], enhancer_logic: additive, initiation_prob: 0.0643, pause_release_prob: 0.039, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 557, tes: 560, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [475, 531, 601], enhancer_logic: additive, initiation_prob: 0.0779, pause_release_prob: 0.0319, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 2587, tes: 2158, load_prob: 0.0817, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2371, 2540, 2556, 2564, 2657], enhancer_logic: additive, initiation_prob: 0.0521, pause_release_prob: 0.0308, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 10}
+      - {tss: 2620, tes: 2727, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2495], enhancer_logic: additive, initiation_prob: 0.2994, pause_release_prob: 0.0317, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 8}
+      - {tss: 2897, tes: 2979, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2695, 2884], enhancer_logic: additive, initiation_prob: 0.2536, pause_release_prob: 0.0458, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 2791, tes: 2741, load_prob: 0.05107, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2764, 2781, 2808], enhancer_logic: additive, initiation_prob: 0.1169, pause_release_prob: 0.04, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 2143, tes: 2108, load_prob: 0.06316, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2124, 2132, 2136], enhancer_logic: additive, initiation_prob: 0.2806, pause_release_prob: 0.0387, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 11}
+      - {tss: 1873, tes: 1896, load_prob: 0.1218, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1899, 1915, 1951, 2677, 2980], enhancer_logic: additive, initiation_prob: 0.1126, pause_release_prob: 0.0365, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 2831, tes: 2852, load_prob: 0.04927, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2781, 2804, 2845], enhancer_logic: additive, initiation_prob: 0.2639, pause_release_prob: 0.0432, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 3006, tes: 3024, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2981, 2995, 2996, 3011, 3051], enhancer_logic: additive, initiation_prob: 0.0689, pause_release_prob: 0.0278, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 1990, tes: 1976, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2108, 2133], enhancer_logic: additive, initiation_prob: 0.2476, pause_release_prob: 0.031, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 1946, tes: 1933, load_prob: 0.01393, requires_enhancer: true, load_requires_enhancer: true, enhancers: [1945, 2022], enhancer_logic: additive, initiation_prob: 0.2761, pause_release_prob: 0.047, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 3036, tes: 3047, load_prob: 0.01741, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.276, pause_release_prob: 0.0565, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 2592, tes: 2595, load_prob: 0.10408, requires_enhancer: true, load_requires_enhancer: true, enhancers: [2552, 2645], enhancer_logic: additive, initiation_prob: 0.2039, pause_release_prob: 0.0483, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 9}
+      - {tss: 4167, tes: 4118, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.6318, pause_release_prob: 0.0585, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 3762, tes: 3880, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3724, 3736, 3770, 3774, 3781], enhancer_logic: additive, initiation_prob: 0.0714, pause_release_prob: 0.0362, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 3551, tes: 3438, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2845, pause_release_prob: 0.0592, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 3284, tes: 3210, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3279, 3305], enhancer_logic: additive, initiation_prob: 0.2846, pause_release_prob: 0.0354, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 3069, tes: 3126, load_prob: 0.04689, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3075, 3090, 3098], enhancer_logic: additive, initiation_prob: 0.2726, pause_release_prob: 0.0369, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 3359, tes: 3306, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5295, pause_release_prob: 0.0576, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 3707, tes: 3752, load_prob: 0.05424, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3648, 3663, 3681], enhancer_logic: additive, initiation_prob: 0.2659, pause_release_prob: 0.0479, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 4030, tes: 4075, load_prob: 0.08429, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4025, 4045], enhancer_logic: additive, initiation_prob: 0.2976, pause_release_prob: 0.049, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 7}
+      - {tss: 3623, tes: 3662, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3553, 3564, 3632, 3636], enhancer_logic: additive, initiation_prob: 0.0823, pause_release_prob: 0.0371, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 11}
+      - {tss: 3944, tes: 3981, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3923, 3998], enhancer_logic: additive, initiation_prob: 0.2299, pause_release_prob: 0.0309, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 3387, tes: 3406, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3335, 3396, 3427], enhancer_logic: additive, initiation_prob: 0.2773, pause_release_prob: 0.05, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 3429, tes: 3413, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3436, 3458, 3488], enhancer_logic: additive, initiation_prob: 0.2631, pause_release_prob: 0.0381, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 4094, tes: 4106, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3760, 4085, 4087], enhancer_logic: additive, initiation_prob: 0.2973, pause_release_prob: 0.0349, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 3175, tes: 3186, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3093, 3167, 3199], enhancer_logic: additive, initiation_prob: 0.1224, pause_release_prob: 0.038, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 3150, tes: 3160, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3246, pause_release_prob: 0.0409, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 7}
+      - {tss: 3689, tes: 3692, load_prob: 0.19429, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3748], enhancer_logic: additive, initiation_prob: 0.1904, pause_release_prob: 0.031, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 4002, tes: 4005, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4009], enhancer_logic: additive, initiation_prob: 0.266, pause_release_prob: 0.035, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 3888, tes: 3891, load_prob: 0.04842, requires_enhancer: true, load_requires_enhancer: true, enhancers: [3899, 3905, 3934], enhancer_logic: additive, initiation_prob: 0.0893, pause_release_prob: 0.0326, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 5298, tes: 5286, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5291, 5303], enhancer_logic: additive, initiation_prob: 0.2119, pause_release_prob: 0.0447, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 4832, tes: 4800, load_prob: 0.0933, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2609, pause_release_prob: 0.0557, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 14}
+      - {tss: 4361, tes: 4336, load_prob: 0.19765, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4250, 4312], enhancer_logic: additive, initiation_prob: 0.2057, pause_release_prob: 0.0465, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 5111, tes: 5090, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5073, 5116, 5133, 5139, 5180], enhancer_logic: additive, initiation_prob: 0.0858, pause_release_prob: 0.0387, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 4727, tes: 4746, load_prob: 0.02904, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4680, 4686, 4834], enhancer_logic: additive, initiation_prob: 0.2357, pause_release_prob: 0.033, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 10}
+      - {tss: 4376, tes: 4393, load_prob: 0.13489, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4352], enhancer_logic: additive, initiation_prob: 0.1903, pause_release_prob: 0.0438, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 4872, tes: 4885, load_prob: 0.18461, requires_enhancer: true, load_requires_enhancer: true, enhancers: [4890, 4920, 4990], enhancer_logic: additive, initiation_prob: 0.2715, pause_release_prob: 0.036, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 5994, tes: 5784, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6027], enhancer_logic: additive, initiation_prob: 0.2468, pause_release_prob: 0.0411, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 5664, tes: 5769, load_prob: 0.12436, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5678, 5686, 5707], enhancer_logic: additive, initiation_prob: 0.1042, pause_release_prob: 0.0308, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 5386, tes: 5464, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3517, pause_release_prob: 0.056, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 7}
+      - {tss: 5582, tes: 5643, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5568, 5592], enhancer_logic: additive, initiation_prob: 0.2898, pause_release_prob: 0.0435, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6120, tes: 6077, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6053, 6125], enhancer_logic: additive, initiation_prob: 0.0726, pause_release_prob: 0.0368, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 6041, tes: 6072, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6007, 6025, 6063], enhancer_logic: additive, initiation_prob: 0.2679, pause_release_prob: 0.0488, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 5545, tes: 5518, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5560, 5563, 5662], enhancer_logic: additive, initiation_prob: 0.1949, pause_release_prob: 0.0404, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 5481, tes: 5504, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.29, pause_release_prob: 0.0579, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 5567, tes: 5550, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5523, 5591], enhancer_logic: additive, initiation_prob: 0.2914, pause_release_prob: 0.0411, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 5362, tes: 5378, load_prob: 0.00514, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5370], enhancer_logic: additive, initiation_prob: 0.1931, pause_release_prob: 0.0392, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 5353, tes: 5342, load_prob: 0.0421, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5369, 5413, 5422], enhancer_logic: additive, initiation_prob: 0.1311, pause_release_prob: 0.0315, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 6017, tes: 6009, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6043], enhancer_logic: additive, initiation_prob: 0.2326, pause_release_prob: 0.047, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 16}
+      - {tss: 5651, tes: 5658, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5555, 5670], enhancer_logic: additive, initiation_prob: 0.0559, pause_release_prob: 0.0323, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6128, tes: 6134, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6121, 6127], enhancer_logic: additive, initiation_prob: 0.2371, pause_release_prob: 0.0355, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6146, tes: 6141, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [5614, 5744, 6115], enhancer_logic: additive, initiation_prob: 0.122, pause_release_prob: 0.0389, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 5333, tes: 5337, load_prob: 0.05824, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3248, pause_release_prob: 0.0572, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 6668, tes: 6664, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3082, pause_release_prob: 0.0414, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 6373, tes: 6288, load_prob: 0.20807, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2715, pause_release_prob: 0.0502, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6547, tes: 6495, load_prob: 0.29291, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6505], enhancer_logic: additive, initiation_prob: 0.1884, pause_release_prob: 0.0373, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6639, tes: 6617, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2567, pause_release_prob: 0.0534, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 6593, tes: 6577, load_prob: 0.18634, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5738, pause_release_prob: 0.0571, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 10}
+      - {tss: 6612, tes: 6600, load_prob: 0.10236, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6630], enhancer_logic: additive, initiation_prob: 0.2728, pause_release_prob: 0.0329, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 6412, tes: 6409, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [6393, 6395, 6424], enhancer_logic: additive, initiation_prob: 0.2022, pause_release_prob: 0.0457, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 6459, tes: 6462, load_prob: 0.12273, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3794, pause_release_prob: 0.0416, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 5}
+      - {tss: 7225, tes: 6686, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.5743, pause_release_prob: 0.082, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 15}
+      - {tss: 7237, tes: 7256, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3066, pause_release_prob: 0.0524, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 7480, tes: 7780, load_prob: 0.08129, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7474], enhancer_logic: additive, initiation_prob: 0.2428, pause_release_prob: 0.0322, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 7463, tes: 7418, load_prob: 0.16063, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7431, 7472], enhancer_logic: additive, initiation_prob: 0.3054, pause_release_prob: 0.0461, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 7}
+      - {tss: 7884, tes: 7911, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7857, 7894, 7897], enhancer_logic: additive, initiation_prob: 0.1858, pause_release_prob: 0.0431, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 8041, tes: 8019, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7997, 8019], enhancer_logic: additive, initiation_prob: 0.2895, pause_release_prob: 0.0339, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 14}
+      - {tss: 7971, tes: 7950, load_prob: 0.08993, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7998], enhancer_logic: additive, initiation_prob: 0.2318, pause_release_prob: 0.0427, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 7314, tes: 7331, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7333, 7429], enhancer_logic: additive, initiation_prob: 0.188, pause_release_prob: 0.0372, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 8215, tes: 8231, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.3234, pause_release_prob: 0.0469, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 7823, tes: 7810, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [7837, 7857], enhancer_logic: additive, initiation_prob: 0.2554, pause_release_prob: 0.037, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 8124, tes: 8131, load_prob: 0.03444, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8149], enhancer_logic: additive, initiation_prob: 0.27, pause_release_prob: 0.0337, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 8242, tes: 8237, load_prob: 0.30232, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8234, 8249], enhancer_logic: additive, initiation_prob: 0.2299, pause_release_prob: 0.0352, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 8}
+      - {tss: 9202, tes: 8982, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [9184, 9189, 9197, 9285], enhancer_logic: additive, initiation_prob: 0.048, pause_release_prob: 0.0315, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 8805, tes: 8709, load_prob: 0.01189, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8818, 8824], enhancer_logic: additive, initiation_prob: 0.0858, pause_release_prob: 0.0368, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 8939, tes: 8874, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8861, 8951, 9034], enhancer_logic: additive, initiation_prob: 0.2957, pause_release_prob: 0.0359, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 8613, tes: 8650, load_prob: 0.27381, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2916, pause_release_prob: 0.0541, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 9389, tes: 9353, load_prob: 0.03977, requires_enhancer: true, load_requires_enhancer: true, enhancers: [9043, 9328, 9332, 9337], enhancer_logic: additive, initiation_prob: 0.0624, pause_release_prob: 0.0276, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 4}
+      - {tss: 8475, tes: 8441, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8453, 9286], enhancer_logic: additive, initiation_prob: 0.1324, pause_release_prob: 0.0348, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 8674, tes: 8683, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8562, 8639], enhancer_logic: additive, initiation_prob: 0.186, pause_release_prob: 0.0322, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 8831, tes: 8839, load_prob: 0.30232, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.2629, pause_release_prob: 0.0409, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 7}
+      - {tss: 8965, tes: 8960, load_prob: 0.17119, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8940], enhancer_logic: additive, initiation_prob: 0.2029, pause_release_prob: 0.0425, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 6}
+      - {tss: 9416, tes: 9420, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [9124, 9343, 9364], enhancer_logic: additive, initiation_prob: 0.206, pause_release_prob: 0.0424, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+      - {tss: 8857, tes: 8853, load_prob: 0.26794, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8840, 8870], enhancer_logic: additive, initiation_prob: 0.2823, pause_release_prob: 0.0326, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 8663, tes: 8660, load_prob: 0.02965, requires_enhancer: true, load_requires_enhancer: true, enhancers: [8605, 8649, 8768], enhancer_logic: additive, initiation_prob: 0.1156, pause_release_prob: 0.0296, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 2}
+      - {tss: 9466, tes: 9486, load_prob: 0.19207, requires_enhancer: false, load_requires_enhancer: false, initiation_prob: 0.6384, pause_release_prob: 0.0713, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 8}
+      - {tss: 9597, tes: 9860, load_prob: 0.00544, requires_enhancer: true, load_requires_enhancer: true, enhancers: [9495, 9545, 9618, 9628, 9753], enhancer_logic: additive, initiation_prob: 0.0607, pause_release_prob: 0.0267, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 3}
+      - {tss: 9968, tes: 9963, load_prob: 0.21022, requires_enhancer: true, load_requires_enhancer: true, enhancers: [9946, 9960, 9963], enhancer_logic: additive, initiation_prob: 0.2423, pause_release_prob: 0.039, elongation_step_prob: 0.424, pause_offset: 1, termination_prob: 0.0444, termination_window: 1}
+
+  plugins:
+    topology:    polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
+    load:        polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
+    unload_prob: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:unload_prob
+    capture:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:capture
+    release:     polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:release
+    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
+    rnapii_load:        null
+    rnapii_translocate: null
+
+viewer:
+  enabled: false
+  max_frames: 1000
+  bridge_cost: 1.0
+  insulation_score_window: 500
+  site_start: 0
+  site_end: 10000
+
+polymer:
+  platform: cuda
+  gpu: "0"
+  integrator: variableLangevin
+  error_tol: 0.02
+  collision_rate: 0.1
+  precision: single
+  seed: 2042
+  density: 0.2
+  pbc: false
+  md_steps_per_block: 2000
+  save_every_blocks: 1
+  restart_every_blocks: 5000
+  initial_relaxation_steps: 500000   # scales with locus size
+  pre_recording_steps: 166666
+  smc_bond_wiggle: 0.1
+  smc_bond_dist: 1.0
+  max_data_length: 1000
+  overwrite: true
+  plugins:
+    force_builder:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:paper_force_builder
+      kwargs:
+        bond_length: 1.0
+        bond_wiggle: 0.1
+        angle_k: 1.0
+        repulsion_energy: 1.5
+        repulsion_radius: 1.05
+        attraction_energy: 0.0
+        attraction_radius: 1.1
+        restrict_nonbonded_to_chains: true
+        replicate_ep_pairs_across_chains: true
+        ep_pairs: []
+        selective_attraction_energy: 0.0
+        polii_self_affinity: 0.0
+        selective_repulsion_energy: 0.0
+        confinement_density: 0.15
+        confinement_per_chain: true
+        confinement_k: 5.0
+    initial_conformation:
+      target: polychrom.pipelines.loop_extrusion.plugins.forces:grow_cubic_conformation
+
+contacts:
+  replicate_map_starts_across_chains: true
+  map_starts: [0]
+  map_size: 10000
+  cutoff: [2]
+  # Resolutions (in monomers) at which qc + compare run the 3D analysis: the
+  # native per-monomer ICE'd map plus a 10-monomer coarsened-then-ICE'd map.
+  analysis_resolutions: [1, 10]
+  num_processes: 12
+  verbose: true
+  plugins:
+    sampler:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:monomer_resolution_sampler
+    obs_over_exp:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:balanced_observed_over_expected
+      kwargs:
+        max_iter: 2000
+        tol: 1.0e-6
+        ignore_diagonals: 2
+    viz:
+      target: polychrom.pipelines.loop_extrusion.plugins.sampling:default_oe_heatmap
+      kwargs:
+        log: true
+        cmap: coolwarm
+        vmin: -1.0
+        vmax: 1.0
+        figsize: [12, 12]
+        dpi: 150

@@ -9,6 +9,15 @@ import yaml
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gen_realistic_configs_variable_tick.py"
 
+# Import the generator module so expected calibration values are derived from its OWN
+# constants (lifetime, elongation, load cap, termination window, ...) rather than hardcoded
+# -- the reference numbers then track the constants instead of going stale on every re-tune.
+import importlib.util as _ilu  # noqa: E402
+
+_spec = _ilu.spec_from_file_location("_genmod", SCRIPT)
+genmod = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(genmod)
+
 
 def _generate(tmp_path, tick_seconds, suffix, extra=None):
     subprocess.run(
@@ -57,28 +66,40 @@ def test_variable_tick_20s_reproduces_reference_defaults(tmp_path):
     topo = _topology(cfg)
     gene = _first_gene(cfg)
 
+    cal = genmod.make_calibration(20)
     assert lef["tick_seconds"] == 20
-    assert lef["lifetime"] == 75
-    assert lef["lifetime_stalled"] == 75
-    assert lef["lifetime_ctcf"] == 300
-    assert topo["lifetime_rnapii_stalled"] == 75
+    assert lef["lifetime"] == cal["lifetime"]
+    assert lef["lifetime_stalled"] == cal["lifetime"]
+    assert lef["lifetime_ctcf"] == cal["lifetime_ctcf"]
+    assert topo["lifetime_rnapii_stalled"] == cal["lifetime"]
     # 12096*20/20 = 12096 snapped to the nearest multiple of restart_every_blocks
-    assert lef["trajectory_length"] == 10000
-    assert cfg["polymer"]["restart_every_blocks"] == 5000
+    assert lef["trajectory_length"] == cal["trajectory_length"]
+    assert cfg["polymer"]["restart_every_blocks"] == cal["restart_every_blocks"]
     assert lef["trajectory_length"] % cfg["polymer"]["restart_every_blocks"] == 0
-    assert lef["warmup_steps"] == 10000
-    assert cfg["polymer"]["md_steps_per_block"] == 5000
+    assert lef["warmup_steps"] == cal["warmup_steps"]
+    assert cfg["polymer"]["md_steps_per_block"] == cal["md_steps_per_block"]
 
-    assert topo["rnapii_stride"] == 2
-    assert gene["elongation_step_prob"] == pytest.approx(1.0)
-    assert gene["load_prob"] == pytest.approx(0.0198)
-    assert gene["termination_prob"] == pytest.approx(0.0392)
+    assert topo["rnapii_stride"] == cal["rnapii_stride"]
+    assert gene["elongation_step_prob"] == pytest.approx(round(cal["elongation_step_prob"], 6))
+    # load_prob is per-gene log-normal heterogeneous, clipped to [1e-4, load_prob_max].
+    assert 1e-4 <= gene["load_prob"] <= cal["load_prob_max"] + 1e-9
+    # termination_prob is now per-class (CLASS_UNBIND_RATE), falling back to the global rate.
+    _ub = genmod.CLASS_UNBIND_RATE.get(gene.get("gene_class", ""), genmod.RNAP_UNBIND_RATE)
+    assert gene["termination_prob"] == pytest.approx(round(genmod._rate_to_prob(_ub, lef["tick_seconds"]), 4))
+    # 3' termination window: per-gene length >= 1 site + decelerated crawl step prob emitted.
+    assert gene["termination_window"] >= 1
+    assert topo["rnapii_termination_step_prob"] == pytest.approx(
+        round(cal["rnapii_termination_step_prob"], 6))
 
-    expected_block = math.exp(-20 / 100)
-    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_paused_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_elongating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_terminating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
+    # Pre-initiation Pol II is a LEAKY barrier (shorter bypass time) than paused/elongating
+    # /terminating Pol II; each block prob = exp(-tick / its bypass seconds).
+    block = math.exp(-20 / genmod.RNAP_BYPASS_SECONDS)
+    preinit = math.exp(-20 / genmod.RNAP_PRE_INITIATION_BYPASS_SECONDS)
+    term_block = math.exp(-20 / genmod.RNAP_TERM_BYPASS_SECONDS)
+    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(preinit, abs=5e-4)
+    assert topo["rnapii_paused_block_prob"] == pytest.approx(block, abs=5e-4)
+    assert topo["rnapii_elongating_block_prob"] == pytest.approx(block, abs=5e-4)
+    assert topo["rnapii_terminating_block_prob"] == pytest.approx(term_block, abs=5e-4)
 
 
 def test_variable_tick_4s_preserves_real_durations_and_rates(tmp_path):
@@ -87,27 +108,33 @@ def test_variable_tick_4s_preserves_real_durations_and_rates(tmp_path):
     topo = _topology(cfg)
     gene = _first_gene(cfg)
 
+    cal = genmod.make_calibration(4)
     assert lef["tick_seconds"] == 4
-    assert lef["lifetime"] == 375
-    assert lef["lifetime_stalled"] == 375
-    assert lef["lifetime_ctcf"] == 1500
-    assert topo["lifetime_rnapii_stalled"] == 375
+    assert lef["lifetime"] == cal["lifetime"]
+    assert lef["lifetime_stalled"] == cal["lifetime"]
+    assert lef["lifetime_ctcf"] == cal["lifetime_ctcf"]
+    assert topo["lifetime_rnapii_stalled"] == cal["lifetime"]
     # 12096*20/4 = 60480 snapped to the nearest multiple of restart_every_blocks
-    assert lef["trajectory_length"] == 60000
+    assert lef["trajectory_length"] == cal["trajectory_length"]
     assert lef["trajectory_length"] % cfg["polymer"]["restart_every_blocks"] == 0
-    assert lef["warmup_steps"] == 50000
-    assert cfg["polymer"]["md_steps_per_block"] == 1000
+    assert lef["warmup_steps"] == cal["warmup_steps"]
+    assert cfg["polymer"]["md_steps_per_block"] == cal["md_steps_per_block"]
 
-    assert topo["rnapii_stride"] == 1
-    assert gene["elongation_step_prob"] == pytest.approx(0.4)
-    assert gene["load_prob"] == pytest.approx(1 - math.exp(-0.001 * 4), abs=5e-5)
-    assert gene["termination_prob"] == pytest.approx(1 - math.exp(-0.002 * 4), abs=5e-5)
+    assert topo["rnapii_stride"] == cal["rnapii_stride"]
+    assert gene["elongation_step_prob"] == pytest.approx(round(cal["elongation_step_prob"], 6))
+    assert 1e-4 <= gene["load_prob"] <= cal["load_prob_max"] + 1e-9
+    # termination_prob is now per-class (CLASS_UNBIND_RATE), falling back to the global rate.
+    _ub = genmod.CLASS_UNBIND_RATE.get(gene.get("gene_class", ""), genmod.RNAP_UNBIND_RATE)
+    assert gene["termination_prob"] == pytest.approx(round(genmod._rate_to_prob(_ub, lef["tick_seconds"]), 4))
+    assert gene["termination_window"] >= 1
 
-    expected_block = math.exp(-4 / 100)
-    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_paused_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_elongating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
-    assert topo["rnapii_terminating_block_prob"] == pytest.approx(expected_block, abs=5e-4)
+    block = math.exp(-4 / genmod.RNAP_BYPASS_SECONDS)
+    preinit = math.exp(-4 / genmod.RNAP_PRE_INITIATION_BYPASS_SECONDS)
+    term_block = math.exp(-4 / genmod.RNAP_TERM_BYPASS_SECONDS)
+    assert topo["rnapii_pre_initiation_block_prob"] == pytest.approx(preinit, abs=5e-4)
+    assert topo["rnapii_paused_block_prob"] == pytest.approx(block, abs=5e-4)
+    assert topo["rnapii_elongating_block_prob"] == pytest.approx(block, abs=5e-4)
+    assert topo["rnapii_terminating_block_prob"] == pytest.approx(term_block, abs=5e-4)
 
 
 def test_variable_tick_25s_uses_fractional_multistep_rnapii(tmp_path):
@@ -115,8 +142,9 @@ def test_variable_tick_25s_uses_fractional_multistep_rnapii(tmp_path):
     topo = _topology(cfg)
     gene = _first_gene(cfg)
 
-    assert topo["rnapii_stride"] == 3
-    assert gene["elongation_step_prob"] == pytest.approx(2.5 / 3)
+    cal = genmod.make_calibration(25)
+    assert topo["rnapii_stride"] == cal["rnapii_stride"]
+    assert gene["elongation_step_prob"] == pytest.approx(round(cal["elongation_step_prob"], 6))
 
 
 def test_variable_tick_config4_defaults_use_phenotype_lesion_regime(tmp_path):
@@ -145,20 +173,25 @@ def test_variable_tick_config4_defaults_use_phenotype_lesion_regime(tmp_path):
     topo3 = _topology(cfg3)
     topo4 = _topology(cfg4)
 
-    # config3 scales every (interior) boundary strength by --bstr-mult (=3),
+    # config3 scales every (interior) boundary strength by the --bstr-mult default,
     # capped at 1.0. With the per-TAD schema both oriented sides carry the value,
     # so the reconstructed interior strengths scale identically.
+    import numpy as np  # match the generator's np.round (round-half-to-even) exactly
+
+    mult = 2.5  # current --bstr-mult default (see argparse in main)
     s2 = _interior_strengths(topo2)
     s3 = _interior_strengths(topo3)
     assert set(s2) == set(s3)
     for site, strength in s2.items():
-        assert s3[site] == pytest.approx(round(min(strength * 3.0, 1.0), 2))
+        assert s3[site] == pytest.approx(float(np.round(min(strength * mult, 1.0), 2)))
 
+    ts = 8
     assert cfg4["lef"]["plugins"]["lesion"].endswith(":update_lesions")
     assert topo4["lesion_spacing"] == 10
     assert topo4["lesion_type_a_prob"] == pytest.approx(0.25)
-    assert topo4["lesion_prerecognition_ticks"] == 150
-    assert topo4["lesion_repair_ticks"] == 38
+    assert topo4["lesion_prerecognition_ticks"] == max(
+        1, round(genmod.LESION_PRERECOGNITION_SECONDS / ts))
+    assert topo4["lesion_repair_ticks"] == max(1, round(genmod.LESION_REPAIR_SECONDS / ts))
     assert topo4["lesion_block_prob"] == pytest.approx(0.97)
 
 

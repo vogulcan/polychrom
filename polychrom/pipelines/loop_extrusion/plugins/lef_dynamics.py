@@ -70,7 +70,14 @@ class Cohesin:
 # ---------------------------------------------------------------------------
 
 def _chain_length(args: Dict) -> int:
-    return int(args.get("chain_length", args["N"]))
+    # chain_length is fixed for the whole run; memoise on the (persistent) args
+    # dict so the per-step hot path does one dict lookup instead of ``get`` +
+    # fallback + ``int`` every call. Same value, byte-identical.
+    cl = args.get("_chain_length_cache")
+    if cl is None:
+        cl = int(args.get("chain_length", args["N"]))
+        args["_chain_length_cache"] = cl
+    return cl
 
 
 def _same_chain(a: int, b: int, args: Dict) -> bool:

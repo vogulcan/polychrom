@@ -33,6 +33,7 @@ cohesin; only ELONGATING Pol II can push it (Fursova & Larson 2024, Fig 3a).
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -52,7 +53,14 @@ STATE_STALLED = 4
 
 
 def _chain_length(args: Dict) -> int:
-    return int(args.get("chain_length", args["N"]))
+    # chain_length is fixed for the whole run; memoise on the (persistent) args
+    # dict so the per-step hot path (``_valid_step`` -> ``_same_chain``) does one
+    # dict lookup instead of ``get`` + fallback + ``int`` every call. Same value.
+    cl = args.get("_chain_length_cache")
+    if cl is None:
+        cl = int(args.get("chain_length", args["N"]))
+        args["_chain_length_cache"] = cl
+    return cl
 
 
 def _same_chain(a: int, b: int, args: Dict) -> bool:
@@ -91,9 +99,21 @@ class Gene:
     load_requires_enhancer: bool = False    # recruitment also requires E-P contact
     initiation_prob: float = 1.0            # PRE-INITIATION -> PAUSED per tick
     pause_release_prob: float = 1.0         # PAUSED  -> ELONGATING per tick
+    # PAUSED -> promoter-proximal premature termination per tick (competes with release). <0 falls
+    # back to the global ``rnapii_pause_term_prob``. Per-gene so productive_fraction = k_release/
+    # (k_release+k_term) can be class-specific (housekeeping terminate less -> more productive).
+    pause_term_prob: float = -1.0
     elongation_step_prob: float = 1.0       # per-tick step prob during ELONGATING
     pause_offset: int = 0                   # PAUSED site = TSS + direction*pause_offset
     termination_prob: float = 1.0           # TERMINATING -> unload per tick (1.0 = no dwell)
+    # 3' termination window length in sites (kb) DOWNSTREAM of the TES, into which a terminating
+    # Pol II walks before release (Schwalb 2016 TT-seq: TTSs in a window median ~3.3 kb past the pA
+    # site, up to >10 kb). 0 = legacy single-slot TES dwell. A positive window lets the Pol vacate
+    # the TES on its first step so following Pol can complete -> removes the single-slot 3'-end jam.
+    termination_window: int = 0
+    # Regulatory class tag (e.g. hk_const/hk_high/celltype/dev). Purely a label carried through to
+    # the trajectory for per-class QC; the dynamics never read it.
+    gene_class: str = ""
 
     def __post_init__(self) -> None:
         # Keep ``enhancers`` (canonical) and ``enhancer_pos`` (legacy single) in
@@ -170,9 +190,12 @@ def build_genes(
             load_requires_enhancer=bool(spec.get("load_requires_enhancer", False)),
             initiation_prob=float(spec.get("initiation_prob", 1.0)),
             pause_release_prob=float(spec.get("pause_release_prob", 1.0)),
+            pause_term_prob=float(spec.get("pause_term_prob", -1.0)),
             elongation_step_prob=float(spec.get("elongation_step_prob", 1.0)),
             pause_offset=int(spec.get("pause_offset", 0)),
             termination_prob=float(spec.get("termination_prob", 1.0)),
+            termination_window=int(spec.get("termination_window", 0)),
+            gene_class=str(spec.get("gene_class", "")),
         ))
     return genes
 
@@ -185,6 +208,7 @@ def compute_ep_contacts(
     cohesins,
     genes: Iterable[Gene],
     tolerance: int = 2,
+    chain_length: Optional[int] = None,
 ) -> Dict[int, int]:
     """Map each gene_id to HOW MANY of its enhancers are currently in E-P contact.
 
@@ -199,20 +223,55 @@ def compute_ep_contacts(
     ``gene_id in result`` still tests "this gene has E-P contact" (a multi-
     enhancer generalisation of the old set return). The count drives dosage in
     :func:`enhancer_factor`. Genes with no enhancers are skipped.
+
+    ``chain_length`` buckets cohesin loops by chain (``pos // chain_length``) so
+    each gene is only tested against cohesins on its OWN chain. On the
+    concatenated replicate lattice a cohesin on another chain has a disjoint
+    coordinate range and can never bracket an EP pair, so this is an EXACT
+    optimisation -- byte-identical output, but O(genes x cohesins_per_chain)
+    instead of O(genes x cohesins_total) per tick (the cross-chain scan was the
+    only super-linear term in the 1D tick). ``None`` (single chain / tests) puts
+    every cohesin in one bucket, reproducing the old global scan exactly.
     """
-    intervals = [
-        (min(c.left.pos, c.right.pos), max(c.left.pos, c.right.pos))
-        for c in cohesins
-    ]
+    # Bucket cohesin loops by chain, then within each chain index them for
+    # O(log) interval-containment queries. An enhancer is "in contact" iff some
+    # loop has L <= lo and R >= hi. Sorting loops by L and carrying a running max
+    # of R answers that with one bisect: among loops with L <= lo (a prefix of
+    # the L-sorted list), is max R >= hi? Identical boolean to the old `any(...)`
+    # scan, but O(genes log cohesins) per tick instead of O(genes x cohesins).
+    by_chain: Dict[int, List[Tuple[int, int]]] = {}
+    for c in cohesins:
+        lo_c = min(c.left.pos, c.right.pos)
+        hi_c = max(c.left.pos, c.right.pos)
+        by_chain.setdefault(lo_c // chain_length if chain_length else 0, []).append(
+            (lo_c, hi_c)
+        )
+    indexed: Dict[int, Tuple[List[int], List[int]]] = {}
+    for key, loops in by_chain.items():
+        loops.sort()                              # by L, then R
+        ls = [L for L, _ in loops]
+        pmax_r: List[int] = []
+        run = -1
+        for _, R in loops:
+            if R > run:
+                run = R
+            pmax_r.append(run)
+        indexed[key] = (ls, pmax_r)
+
     out: Dict[int, int] = {}
     for g in genes:
         if not g.enhancers:
             continue
+        chain = indexed.get(g.tss // chain_length if chain_length else 0)
+        if chain is None:
+            continue
+        ls, pmax_r = chain
         count = 0
         for enhancer in g.enhancers:
             lo = min(g.tss, enhancer) + tolerance
             hi = max(g.tss, enhancer) - tolerance
-            if any(L <= lo and R >= hi for L, R in intervals):
+            idx = bisect.bisect_right(ls, lo)     # #loops with L <= lo
+            if idx and pmax_r[idx - 1] >= hi:
                 count += 1
         if count:
             out[g.gene_id] = count
@@ -508,12 +567,41 @@ def stateful_translocate_rnapii(
       cohesin loss the restraint is relieved (faster release), which
       compensates for reduced recruitment and keeps steady-state output
       roughly constant (the cohesin-loss paradox). Default ``1.0`` = off.
+
+      Promoter-proximal PREMATURE TERMINATION (competing kinetic channel):
+      a paused Pol II leaves the pause by one of two COMPETING channels --
+      productive release (per-gene ``gene.pause_release_prob`` = k_release) or
+      premature termination (global ``rnapii_pause_term_prob`` = k_termination).
+      Each tick, termination is tried first (unload, no transcript), then
+      release. The SINGLE-polymerase pause dwell is therefore
+      ``tau = dt / (k_release + k_termination)`` -- SHORT (~0.4 min; Lysakovskaia
+      et al. 2025; ~16.6 s median half-life, 2026 PRO-seq) because termination is
+      fast -- and the productive fraction is
+      ``k_release / (k_release + k_termination)`` (~0.1-0.25; activity-dependent,
+      since active genes have a higher k_release -> lower termination). The
+      minutes-scale "apparent" pause duration (Gressel et al. 2019; Jonkers 2014)
+      is NOT a single-Pol dwell: it is occupancy/output (pause occupancy divided
+      by PRODUCTIVE initiation) and is inflated ~1/productive_fraction-fold by the
+      terminated polymerases dropped from the output denominator -- the metrics
+      report it separately. Default ``rnapii_pause_term_prob = 0.0`` = off (every
+      paused Pol II eventually releases productively, the legacy behaviour).
     * **ELONGATING**: attempt up to ``rnapii_stride`` ``+direction`` steps,
       each with probability ``gene.elongation_step_prob``.
     """
     genes: List[Gene] = args["genes"]
-    tol = int(args.get("ep_contact_tolerance", 2))
-    ep_contacts = compute_ep_contacts(cohesins, genes, tolerance=tol)
+    # lef.run already computed EP contacts for this exact (cohesins, genes) state
+    # this tick and cached them under "current_ep_contacts" -- reuse rather than
+    # repeat the identical scan. Fall back to computing when called standalone.
+    ep_contacts = args.get("current_ep_contacts")
+    if ep_contacts is None:
+        tol = int(args.get("ep_contact_tolerance", 2))
+        ep_contacts = compute_ep_contacts(
+            cohesins, genes, tolerance=tol, chain_length=_chain_length(args)
+        )
+
+    # Premature-termination at the promoter-proximal pause: a per-tick channel
+    # that competes with productive release (gene.pause_release_prob).
+    pause_term_prob = float(args.get("rnapii_pause_term_prob", 0.0))
 
     # Tei 2026 gatekeeper: precompute cohesin leg positions once per tick so the
     # PAUSED branch can detect a cohesin physically associated with the paused
@@ -527,6 +615,11 @@ def stateful_translocate_rnapii(
 
     lesions = args.get("lesions") or {}
 
+    # Decelerated per-tick step probability for a Pol walking the 3' termination window
+    # (Cortazar 2019: 3' elongation slows to ~0.7-0.9 kb/min). 1.0 -> the Pol always tries
+    # to advance through the window; used only when a gene has termination_window > 0.
+    term_step_prob = float(args.get("rnapii_termination_step_prob", 1.0))
+
     for idx in range(len(rnapiis) - 1, -1, -1):
         r = rnapiis[idx]
         gene = genes[r.gene_id]
@@ -537,12 +630,30 @@ def stateful_translocate_rnapii(
             del rnapiis[idx]
             continue
 
-        # At TES: terminating Pol II dwells as a stationary block, then unloads.
-        if r.pos == gene.tes:
+        # At or PAST the TES: the Pol is TERMINATING. With a 3' termination window it walks
+        # downstream through the window (Schwalb 2016: median ~3.3 kb past the pA site, up to
+        # >10 kb) at the decelerated term_step_prob, releasing stochastically (termination_prob)
+        # or on reaching the ultimate TTS (window end). Because it VACATES the TES on its first
+        # window step, following Pol can complete -- this removes the single-slot 3'-end jam that
+        # otherwise caps gene output at 1/dwell and packs long active gene bodies solid.
+        past_tes = (r.pos - gene.tes) * gene.direction
+        if past_tes >= 0:
             r.attrs["state"] = STATE_TERMINATING
-            if np.random.random() < gene.termination_prob:
-                _unload_at_tes(r, gene, occupied, args)
+            win = gene.termination_window
+            if win <= 0:
+                # Legacy single-slot TES dwell (no window).
+                if np.random.random() < gene.termination_prob:
+                    _unload(r, occupied, args)
+                    del rnapiis[idx]
+                continue
+            # Release at the ultimate TTS (window end) or stochastically along the window.
+            if past_tes >= win or np.random.random() < gene.termination_prob:
+                _unload(r, occupied, args)
                 del rnapiis[idx]
+                continue
+            # Otherwise crawl one site further downstream into the window (decelerated).
+            if term_step_prob >= 1.0 or np.random.random() < term_step_prob:
+                _try_single_step(r, gene, occupied, args)
             continue
 
         state = r.attrs.get("state", STATE_PRE_INITIATION)
@@ -558,6 +669,21 @@ def stateful_translocate_rnapii(
             continue
 
         if state == STATE_PAUSED:
+            # Premature termination competes with productive release (tried first
+            # each tick, regardless of the enhancer gate): the paused Pol II
+            # unloads without a transcript. With release rate k_release and
+            # termination rate k_termination, the single-Pol dwell is
+            # dt/(k_release+k_termination) (short) and the productive fraction is
+            # k_release/(k_release+k_termination).
+            g_pause_term = (gene.pause_term_prob if gene.pause_term_prob >= 0.0
+                            else pause_term_prob)
+            if g_pause_term > 0.0 and np.random.random() < g_pause_term:
+                _unload(r, occupied, args)
+                del rnapiis[idx]
+                args["_rnapii_premature_count"] = (
+                    int(args.get("_rnapii_premature_count", 0)) + 1
+                )
+                continue
             release_prob = gene.pause_release_prob
             if gene.requires_enhancer:
                 factor = enhancer_factor(
@@ -573,15 +699,26 @@ def stateful_translocate_rnapii(
             if np.random.random() >= release_prob:
                 continue
             r.attrs["state"] = STATE_ELONGATING
-            # fall through to elongation step this tick
+            # fall through to elongation; the first step out of the pause is forced
+            # (see `just_released` below) so the pause site frees THIS tick.
 
         # state == STATE_ELONGATING / STATE_STALLED (entering or carried over).
         # A failed speed roll means slow but productive elongation; a failed
         # physical move means a real obstacle stall.
+        #
+        # NON-BLOCKING RELEASE: on the tick a Pol leaves the pause (the local
+        # `state` is still PAUSED here, while r.attrs["state"] is now ELONGATING),
+        # its FIRST step is taken WITHOUT an elongation-speed roll, so it vacates
+        # the pause site immediately instead of lingering there ~1/elongation_step_prob
+        # ticks and throttling the next initiation. Steric exclusion still applies
+        # (a Pol cannot step onto an occupied site), so a congested body can still
+        # stall it -- relieving that is the separate gene-body-capacity change.
+        just_released = (state == STATE_PAUSED)
         stride = max(1, int(args.get("rnapii_stride", 1)))
         stalled = False
-        for _ in range(stride):
-            if np.random.random() >= gene.elongation_step_prob:
+        for i in range(stride):
+            forced = just_released and i == 0
+            if not forced and np.random.random() >= gene.elongation_step_prob:
                 continue
             if not _try_single_step(r, gene, occupied, args):
                 stalled = True

@@ -37,6 +37,12 @@ class ProgressMeter:
         self.min_interval = float(min_interval)
         self._start = time.time()
         self._last = 0.0
+        # Rate baseline -- set on the FIRST update(), not at construction, so any
+        # one-time setup before the first measured iteration (buffer allocation,
+        # lazy imports, warmup) is excluded from the rate. Otherwise the early
+        # rate is optimistic and the ETA *climbs* as the estimate corrects.
+        self._base_t: Optional[float] = None
+        self._base_n = 0
         self.n = 0
 
     def start(self) -> None:
@@ -44,22 +50,39 @@ class ProgressMeter:
 
         Call once, right before the first measured iteration, so one-time setup
         done after construction (energy minimization, relaxation, burn-in) is
-        excluded from the rate/ETA estimate. Without this, ``elapsed`` carries
-        that fixed overhead and the early ETA is inflated until it amortizes.
+        excluded from the rate/ETA estimate. The rate baseline also re-arms on
+        the next update().
         """
         self._start = time.time()
         self._last = 0.0
+        self._base_t = None
+        self._base_n = self.n
 
     def update(self, n: Optional[int] = None, extra: str = "") -> None:
         self.n = self.n + 1 if n is None else int(n)
         now = time.time()
+        if self._base_t is None:                 # first measured iteration
+            self._base_t = now
+            self._base_n = self.n
         if self.n < self.total and (now - self._last) < self.min_interval:
             return
         self._last = now
         el = now - self._start
-        rate = self.n / el if el > 0 else 0.0
+        # Rate is measured from the first update() (steady-state work), not from
+        # construction, so the ETA reflects the real iteration cost -- including
+        # periodic costs (e.g. chunked H5 writes) once they fall inside the
+        # window -- instead of a too-fast startup sample. Shows "?" until there
+        # is a real interval to measure (first line, where d_t == 0).
+        d_n = self.n - self._base_n
+        d_t = now - self._base_t
+        rate = d_n / d_t if d_t > 0 else 0.0
         eta = (self.total - self.n) / rate if rate > 0 else float("nan")
-        rate_str = f"{rate:.0f}/s" if rate >= 1 else f"{rate * 60:.1f}/min"
+        if rate <= 0:
+            rate_str = "?/s"
+        elif rate >= 1:
+            rate_str = f"{rate:.0f}/s"
+        else:
+            rate_str = f"{rate * 60:.1f}/min"
         log.info(
             "[%s] %d/%d (%.1f%%) elapsed=%s ETA=%s %s%s",
             self.stage, self.n, self.total, 100.0 * self.n / self.total,

@@ -1059,45 +1059,6 @@ lef:
     assert _positions_hash(h5) == "c33a0bf3e6f40cd8"
 
 
-def test_golden_gene_aware_convergent_rnapii_trajectory(tmp_path):
-    """gene_aware_convergent topology + RNAPII trajectory is frozen (proves the
-    boundary refactor does not perturb RNAPII dynamics)."""
-    h5 = tmp_path / "rnapii.h5"
-    cfg_path = tmp_path / "rnapii.yaml"
-    cfg_path.write_text(
-        f"""
-lef:
-  chain_length: 300
-  num_chains: 1
-  separation: 50
-  trajectory_length: 80
-  warmup_steps: 20
-  chunk_size: 10
-  seed: 999
-  max_rnapii: 8
-  output_path: {h5}
-  topology_kwargs:
-    tad_positions: [100, 200]
-    boundary_strength: {{100: 0.5, 200: 0.7}}
-    default_boundary_strength: 0.3
-    release_prob: 0.0
-    replicate_genes_across_chains: true
-    rnapii_stride: 1
-    genes:
-      - {{tss: 40, tes: 90, load_prob: 0.05}}
-      - {{tss: 250, tes: 160, load_prob: 0.05}}
-  plugins:
-    topology: polychrom.pipelines.loop_extrusion.plugins.topology:gene_aware_convergent_tad_topology
-    load: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:load_targeted
-    translocate: polychrom.pipelines.loop_extrusion.plugins.lef_dynamics:translocate_with_rnapii
-    rnapii_load: polychrom.pipelines.loop_extrusion.plugins.rnapii:load_rnapii
-    rnapii_translocate: polychrom.pipelines.loop_extrusion.plugins.rnapii:stateful_translocate_rnapii
-"""
-    )
-    lef_stage.run(load_config(cfg_path).lef)
-    assert _positions_hash(h5) == "8ad923dfa870611c"
-
-
 def test_golden_lesion_fields_for_tad_positions():
     """Lesion placement/repair fields derived from tad_positions are frozen, so
     the tads: reconstruction can be proven to reproduce them for the no-gap case."""

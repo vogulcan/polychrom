@@ -52,7 +52,7 @@ micromamba run -n polychrom python scripts/gen_cohesin_barrier_eval.py \
 
 ### Parameter sweeps --- START #####
 
-Boundary strength sweep (boundary strength multiplier)
+# Boundary strength sweep (boundary strength multiplier)
 micromamba run -n polychrom python scripts/sweep_rnapoff_boundary_strength_1d.py \
   --config1 configs/config1_${suffix}.yaml \
   --h5-config1 ${outFolder}/${suffix}_12/Baseline/LEFPositions.h5 \

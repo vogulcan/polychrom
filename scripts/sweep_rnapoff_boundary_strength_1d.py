@@ -229,6 +229,18 @@ def _run_sweep_point(task: dict) -> dict:
     return {"label": task["label"], "h5": str(resolved)}
 
 
+def _analyze_sweep_point(task: dict) -> dict:
+    """Worker: analyze one resolved H5 into its selected metric rows. Top-level +
+    picklable so the post-run analysis can use the same process pool as the runs.
+    ``analyze_run`` only reads the H5 and computes (no shared state, no RNG), so a
+    pooled map is identical to the sequential loop -- and ``ex.map`` preserves
+    input order, so the concatenated frame is byte-identical to before."""
+    core_rows, boundary_metric_rows, _, _ = analyze_run(
+        task["label"], Path(task["cfg_path"]), Path(task["h5"]), task["base_topology"]
+    )
+    return {"label": task["label"], "frame": selected_metric_rows(core_rows, boundary_metric_rows)}
+
+
 def validate_baseline_h5(config1: Path, h5_config1: Path, label: str) -> None:
     if not h5_config1.exists():
         raise FileNotFoundError(
@@ -534,13 +546,31 @@ def main() -> None:
                 print(f"[{n}/{total}] done {res['label']}")
                 resolved_h5[res["label"]] = Path(res["h5"])
 
-    # 3) analyze each resolved H5 (in main process, multiplier order) ------
-    for task in tasks:
-        label = task["label"]
-        core_rows, boundary_metric_rows, _, _ = analyze_run(
-            label, Path(task["cfg_path"]), resolved_h5[label], base_topology
-        )
-        all_metric_rows.append(selected_metric_rows(core_rows, boundary_metric_rows))
+    # 3) analyze each resolved H5 (sequential or the same process pool). ex.map
+    #    preserves multiplier order, and analyze_run is read-only/deterministic,
+    #    so the concatenated result is identical to the sequential version.
+    analysis_tasks = [
+        {
+            "label": task["label"],
+            "cfg_path": task["cfg_path"],
+            "h5": str(resolved_h5[task["label"]]),
+            "base_topology": base_topology,
+        }
+        for task in tasks
+    ]
+    if jobs == 1:
+        for n, atask in enumerate(analysis_tasks, 1):
+            print(f"[analyze {n}/{total}] {atask['label']}")
+            all_metric_rows.append(_analyze_sweep_point(atask)["frame"])
+    else:
+        print(f"analyzing {total} resolved H5s with --jobs {jobs} (process pool, fork context)")
+        ctx = mp.get_context("fork")
+        n = 0
+        with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
+            for res in ex.map(_analyze_sweep_point, analysis_tasks):
+                n += 1
+                print(f"[analyze {n}/{total}] done {res['label']}")
+                all_metric_rows.append(res["frame"])
 
     per_chain = pd.concat(all_metric_rows, ignore_index=True)
     summary, stats = summarize_sweep(per_chain, args.label1, sweep_labels)
